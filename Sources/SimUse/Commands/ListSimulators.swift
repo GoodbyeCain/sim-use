@@ -12,7 +12,7 @@ struct ListSimulators: SimUseExecutableCommand {
         abstract: "List iOS Simulators (legacy; use 'sim-use devices' for cross-platform listing).",
         discussion: """
         Tip: `sim-use devices` is the cross-platform replacement, listing
-        iOS Simulators and Android devices side-by-side with a structured
+        iOS Simulators, Android devices, and HarmonyOS targets side-by-side with a structured
         `--json` envelope that's easier to consume than this command's
         formatted string array. This command is preserved for scripts
         already pinning to it.
@@ -42,7 +42,7 @@ struct ListSimulators: SimUseExecutableCommand {
 
     func format(_ result: ExecutionResult) -> CommandOutput {
         let stdout = result.simulators.map { $0 + "\n" }.joined()
-        let stderr = "Tip: 'sim-use devices' lists both iOS Simulators and Android devices.\n"
+        let stderr = "Tip: 'sim-use devices' lists iOS Simulators, Android devices, and HarmonyOS targets.\n"
         return CommandOutput(stdout: stdout, stderr: stderr)
     }
 }

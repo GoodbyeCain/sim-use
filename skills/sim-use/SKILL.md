@@ -1,6 +1,6 @@
 ---
 name: sim-use
-description: Drive iOS Simulator, Android emulator/device, and physical iPhone/iPad screens for AI agents. Use when asked to automate a simulator or emulator, drive a real iOS device, tap/swipe/type on a device, describe UI, take a screenshot, or interact with a mobile app.
+description: Drive iOS Simulator, Android emulator/device, physical iPhone/iPad, and HarmonyOS emulator/device screens for AI agents. Use when asked to automate a simulator or emulator, drive a real iOS device, tap/swipe/type on a device, describe UI, take a screenshot, or interact with a mobile app.
 ---
 
 ## 0. Preflight

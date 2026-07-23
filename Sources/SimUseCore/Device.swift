@@ -1,23 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
+import ArgumentParser
 import Foundation
 
 /// Cross-platform identifier for one connected device sim-use can target —
 /// an iOS Simulator runtime from `simctl list devices`, an Android
-/// device / emulator from `adb devices`, or a physical iPhone / iPad from
-/// `FBDeviceControl` discovery. The platforms originally shipped with
-/// separate listing commands (`list-simulators`, `android devices`) and
-/// ad-hoc output shapes; `Device` is the unified row that the top-level
-/// `sim-use devices` verb emits so external tooling (the Viewer, future
-/// IDE integrations, agents) only needs one schema.
+/// device / emulator from `adb devices`, a physical iPhone / iPad from
+/// `FBDeviceControl` discovery, or a HarmonyOS target from
+/// `hdc list targets -v`. The platforms originally shipped with separate
+/// listing commands and ad-hoc output shapes; `Device` is the unified row
+/// emitted by the top-level `sim-use devices` verb.
 ///
 /// `platform` answers "which OS", `kind` answers "which carrier" —
-/// deliberately orthogonal axes, because capabilities follow the kind
-/// (an iOS *simulator* takes coordinate HID; an iOS *physical* device
-/// does not) while the verb vocabulary follows the platform.
+/// deliberately orthogonal axes because capabilities follow the kind.
 ///
 /// `state` is intentionally a free-form string: iOS reports
 /// `Booted` / `Shutdown` / `Shutting Down` / `Booting` / `Creating`, and
-/// Android reports `device` / `offline` / `unauthorized`. Callers that
+/// Android reports `device` / `offline` / `unauthorized`, and HarmonyOS
+/// reports hdc connection states such as `Connected` / `Offline`. Callers that
 /// just want "can I act on this now?" should use `isUsable`, which
 /// applies the per-platform rule.
 public struct Device: Codable, Equatable, Hashable, Sendable {
@@ -35,9 +34,14 @@ public struct Device: Codable, Equatable, Hashable, Sendable {
         case runtime
     }
 
-    public enum Platform: String, Codable, Sendable, CaseIterable {
+    public enum Platform: String, Codable, Sendable, CaseIterable, ExpressibleByArgument {
         case ios
         case android
+        case harmonyos
+
+        public init?(argument: String) {
+            self.init(rawValue: argument.lowercased())
+        }
     }
 
     /// What carries the OS: a Simulator runtime, an Android emulator, or
@@ -51,7 +55,7 @@ public struct Device: Codable, Equatable, Hashable, Sendable {
     /// Platform-state strings as the underlying tools emit them.
     /// Extracted as named constants so a future renaming of an iOS
     /// state ("Booted" → something else in a future simctl) or an
-    /// Android one is a single-source change instead of grepping
+    /// Android / HarmonyOS one is a single-source change instead of grepping
     /// for the literal across Device, SimctlDeviceLister, Devices,
     /// DeviceModelTests.
     public enum State {
@@ -60,6 +64,8 @@ public struct Device: Codable, Equatable, Hashable, Sendable {
         public static let androidOnline = "device"
         public static let androidOffline = "offline"
         public static let androidUnauthorized = "unauthorized"
+        public static let harmonyOSConnected = "Connected"
+        public static let harmonyOSReady = "Ready"
     }
 
     public let udid: String
@@ -69,9 +75,8 @@ public struct Device: Codable, Equatable, Hashable, Sendable {
     public let state: String
     /// Human-readable runtime label. iOS: the simctl runtime
     /// (`iOS 18.6`, `watchOS 26.1`) or the physical device's OS
-    /// (`iOS 26.6`); Android: `Android` (we don't fetch the OS version
-    /// via adb to keep `devices` cheap). Nil when the platform genuinely
-    /// has none to report.
+    /// (`iOS 26.6`); Android / HarmonyOS use a platform label when an OS
+    /// version is not fetched to keep `devices` cheap.
     public let runtime: String?
 
     public init(
@@ -115,6 +120,7 @@ public struct Device: Codable, Equatable, Hashable, Sendable {
             switch platform {
             case .ios:     kind = .simulator
             case .android: kind = resolved.hasPrefix("emulator-") ? .emulator : .physical
+            case .harmonyos: kind = .physical
             }
         }
     }
@@ -131,12 +137,15 @@ public struct Device: Codable, Equatable, Hashable, Sendable {
 
     /// Whether sim-use can talk to this device right now. iOS: only
     /// `Booted` sims accept HID + a11y. Android: `device` is the online
-    /// state; `offline` / `unauthorized` aren't reachable through the
-    /// bridge.
+    /// state. HarmonyOS: hdc reports `Connected` or `Ready` for usable
+    /// USB, TCP, physical-device, and emulator targets.
     public var isUsable: Bool {
         switch platform {
         case .ios:     return state == State.iosBooted
         case .android: return state == State.androidOnline
+        case .harmonyos:
+            return state.caseInsensitiveCompare(State.harmonyOSConnected) == .orderedSame
+                || state.caseInsensitiveCompare(State.harmonyOSReady) == .orderedSame
         }
     }
 }

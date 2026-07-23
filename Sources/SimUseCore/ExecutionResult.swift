@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import Foundation
 
-/// Cross-platform `describe-ui` envelope. Both iOS and Android backends
+/// Cross-platform `describe-ui` envelope. iOS, Android, and HarmonyOS backends
 /// produce this shape; the `platform` discriminator tells consumers
 /// which schema `raw` follows. See plan §"Locked decisions — backend
 /// parsing shape" (S1–S3) for rationale.
@@ -13,11 +13,13 @@ public struct DescribeUIResult: Codable, Equatable, Sendable {
         // either way so the JSON envelope is unaffected.
         case ios
         case android
+        case harmonyos
     }
 
     public let platform: Platform
     /// Platform-passthrough raw tree. iOS = AX tree shape; Android =
-    /// bridge `ElementNode` tree shape. Different schemas, both
+    /// bridge `ElementNode` tree shape; HarmonyOS = UITest dumpLayout.
+    /// Different schemas, all
     /// documented under `schemas/`.
     ///
     /// `nil` when the caller did not request `--json`, or opted out

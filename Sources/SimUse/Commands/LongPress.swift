@@ -3,6 +3,7 @@ import ArgumentParser
 import Foundation
 import SimUseCore
 import AndroidBackend
+import HarmonyOSBackend
 import iOSSimBackend
 
 /// Top-level cross-platform `long-press` verb. Mirrors `Tap`'s entire
@@ -48,6 +49,8 @@ struct LongPress: SimUseExecutableCommand {
 
     @OptionGroup var multiTouch: MultiTouchOptions
 
+    @OptionGroup var targetPlatform: TargetPlatformOptions
+
     @OptionGroup var device: DeviceOptions
 
     @OptionGroup var json: JSONOutputOptions
@@ -55,10 +58,12 @@ struct LongPress: SimUseExecutableCommand {
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve(allowPhysical: true)
+        try device.resolve(platform: targetPlatform.platform, allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
+
+    var daemonBypass: Bool { device.resolvedPlatform == .harmonyOS }
 
     typealias ExecutionResult = IOSSimTapCommand.ExecutionResult
 
@@ -76,7 +81,7 @@ struct LongPress: SimUseExecutableCommand {
     }
 
     func execute() async throws -> ExecutionResult {
-        switch PlatformRouter.resolve(udid: device.resolved) {
+        switch device.resolvedPlatform {
         case .android:
             return try executeAndroid()
         case .iOSDevice:
@@ -85,7 +90,9 @@ struct LongPress: SimUseExecutableCommand {
                 reason: "the audit channel's only exposed action is Activate — there is no coordinate input or press-duration control.",
                 alternative: "Use `sim-use tap '#<id>' / --label` for a plain activation; long-press gestures are not available on physical iOS devices."
             )
-        case .iOSSim, .none:
+        case .harmonyOS:
+            return try await executeHarmonyOS()
+        case .iOSSim:
             return try await executeIOSSim()
         }
     }
@@ -129,5 +136,39 @@ struct LongPress: SimUseExecutableCommand {
             duration: duration, multiTouch: multiTouch
         )
         return ExecutionResult(x: result.x, y: result.y)
+    }
+
+    private func executeHarmonyOS() async throws -> ExecutionResult {
+        guard multiTouch.fingers == 1 else {
+            throw CLIError(errorDescription: "HarmonyOS long-press currently supports one finger; use `multi-touch` for an explicit two-finger hold.")
+        }
+        let frameFilter = targeting.frameSpecs.isEmpty
+            ? nil
+            : try? SelectorFrameFilter(specs: targeting.frameSpecs)
+        let selector = HarmonySelector(
+            id: targeting.elementID,
+            label: targeting.elementLabel,
+            labelContains: targeting.labelContains,
+            labelRegex: targeting.labelRegex,
+            value: targeting.elementValue,
+            elementType: targeting.elementType,
+            frame: frameFilter
+        )
+        let explicit = try TapCoordinateResolver.resolve(
+            x: targeting.pointX, y: targeting.pointY, point: targeting.point
+        )
+        let result = try await HarmonyOSTapCommand.performTap(
+            connectKey: device.resolved,
+            alias: alias,
+            x: explicit.map { Int($0.x.rounded()) },
+            y: explicit.map { Int($0.y.rounded()) },
+            selector: selector,
+            duration: duration,
+            preDelay: timing.preDelay,
+            postDelay: timing.postDelay,
+            waitTimeout: timing.waitTimeout,
+            pollInterval: timing.pollInterval
+        )
+        return ExecutionResult(x: Double(result.x), y: Double(result.y))
     }
 }

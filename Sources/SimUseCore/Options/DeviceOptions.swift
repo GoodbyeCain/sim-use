@@ -16,6 +16,11 @@ import Foundation
 /// both flags in one invocation is a fast-fail (a `ValidationError`
 /// surfaced through ArgumentParser's normal exit path).
 ///
+/// HarmonyOS and Android identifiers are not disjoint: both hdc and adb
+/// may expose an IP:port or opaque alphanumeric serial. The optional
+/// `--platform` override is therefore authoritative. Without it, the
+/// legacy shape heuristic remains in effect for compatibility.
+///
 /// Resolution rule mirrors what every cross-platform forwarder did
 /// pre-extraction: an explicit Android-shape identifier bypasses the
 /// iOS-only `DeviceResolver` (which would otherwise probe `simctl` /
@@ -30,7 +35,7 @@ import Foundation
 public struct DeviceOptions: ParsableArguments {
     @Option(
         name: .customLong("device"),
-        help: "Target device — iOS Simulator UDID or Android adb serial. Auto-detected by string shape. Optional — defaults to the only booted iOS simulator on the host (or to the SIM_USE_DEVICE / SIM_USE_UDID env var when set)."
+        help: "Target device identifier. Top-level commands accept an iOS Simulator UDID, Android adb serial, or HarmonyOS hdc connect-key; platform namespaces use their native identifier. Omit only when the command documents auto-resolution."
     )
     public var device: String?
 
@@ -43,6 +48,11 @@ public struct DeviceOptions: ParsableArguments {
     )
     public var udid: String?
 
+    /// Backend override supplied by the top-level `TargetPlatformOptions`.
+    /// Platform-specific namespaces leave this nil and therefore cannot
+    /// accidentally redirect an `ios` command to another backend.
+    public private(set) var platform: Device.Platform?
+
     /// Resolved device identifier. Populated by `resolve()`; the empty
     /// string until then. Reading this before resolution is a
     /// programmer error in a command's `execute()` body and we accept
@@ -52,16 +62,35 @@ public struct DeviceOptions: ParsableArguments {
 
     public init() {}
 
-    /// `allowPhysical` marks the caller as physical-iOS-aware: the 14
-    /// top-level cross-platform verbs pass `true` and route (or reject
-    /// per-verb via `TargetCapabilityError`) in their platform switch.
-    /// The `sim-use ios <verb>` namespace keeps the default `false` —
-    /// it is simulator-only by contract, so a physical UDID still
-    /// fast-fails here with a pointer to the routed surface instead of
-    /// surfacing as a confusing "simulator not found" deep in
-    /// FBSimulatorControl.
-    public mutating func resolve(allowPhysical: Bool = false) throws {
+    /// `allowPhysical` marks the caller as physical-iOS-aware: top-level
+    /// cross-platform verbs pass `true` and route (or reject per-verb via
+    /// `TargetCapabilityError`) in their platform switch. The `sim-use ios`
+    /// namespace keeps the default `false` because it is simulator-only.
+    public mutating func resolve(
+        platform: Device.Platform? = nil,
+        allowPhysical: Bool = false
+    ) throws {
+        self.platform = platform
         let explicit = try Self.selectExplicit(device: device, udid: udid)
+        if let platform {
+            switch platform {
+            case .ios:
+                resolved = try DeviceResolver.resolve(explicit: explicit)
+            case .android, .harmonyos:
+                let environment = ProcessInfo.processInfo.environment
+                let environmentDevice = explicit == nil
+                    ? try Self.selectExplicit(
+                        device: environment["SIM_USE_DEVICE"],
+                        udid: environment["SIM_USE_UDID"]
+                    )
+                    : nil
+                guard let selected = explicit ?? environmentDevice else {
+                    throw CLIError(errorDescription: "Pass --device <id> with --platform \(platform.rawValue), or use the platform namespace for automatic single-device resolution.")
+                }
+                resolved = selected
+            }
+            return
+        }
         if let arg = explicit, PlatformRouter.looksLikeAndroid(arg) {
             resolved = arg
             return
@@ -74,6 +103,10 @@ public struct DeviceOptions: ParsableArguments {
             throw PhysicalIOSDeviceError(identifier: candidate)
         }
         resolved = candidate
+    }
+
+    public var resolvedPlatform: Platform {
+        PlatformRouter.resolve(udid: resolved, override: platform) ?? .iOSSim
     }
 
     /// Apply the same `--device` / `--udid` mutual-exclusion rule used

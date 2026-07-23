@@ -39,6 +39,20 @@ final class DeviceModelTests: XCTestCase {
         }
     }
 
+    func testHarmonyOSConnectedAndReadyAreUsableCaseInsensitively() {
+        for state in ["Connected", "connected", "Ready", "READY"] {
+            let d = Device(udid: "HDC", name: "Harmony", platform: .harmonyos, state: state, runtime: "HarmonyOS")
+            XCTAssertTrue(d.isUsable, "HarmonyOS state '\(state)' should be usable")
+        }
+    }
+
+    func testHarmonyOSOfflineAndUnauthorisedAreNotUsable() {
+        for state in ["Offline", "Unauthorized", "Unknown"] {
+            let d = Device(udid: "HDC", name: "Harmony", platform: .harmonyos, state: state, runtime: "HarmonyOS")
+            XCTAssertFalse(d.isUsable, "HarmonyOS state '\(state)' should not be usable")
+        }
+    }
+
     // MARK: - JSON encoding (wire format)
 
     func testJSONShapeMatchesWireExpectation() throws {

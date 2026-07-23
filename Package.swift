@@ -168,6 +168,10 @@ let package = Package(
             targets: ["AndroidBackend"]
         ),
         .library(
+            name: "HarmonyOSBackend",
+            targets: ["HarmonyOSBackend"]
+        ),
+        .library(
             name: "iOSSimBackend",
             targets: ["iOSSimBackend"]
         ),
@@ -254,6 +258,14 @@ let package = Package(
                 .copy("Resources"),
             ]
         ),
+        .target(
+            name: "HarmonyOSBackend",
+            dependencies: [
+                "SimUseCore",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
+            path: "Sources/HarmonyOSBackend"
+        ),
         .executableTarget(
             name: "SimUse",
             dependencies: [
@@ -261,6 +273,7 @@ let package = Package(
                 "SimUseCore",
                 "SimUseVideo",
                 "AndroidBackend",
+                "HarmonyOSBackend",
                 "iOSSimBackend",
                 "iOSDeviceBackend",
                 "FBSimulatorControl",
@@ -293,7 +306,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SimUseTests",
-            dependencies: ["SimUse", "iOSSimBackend", "iOSDeviceBackend", "SimUseCore", "SimUseVideo"],
+            dependencies: ["SimUse", "iOSSimBackend", "iOSDeviceBackend", "HarmonyOSBackend", "SimUseCore", "SimUseVideo"],
             path: "Tests",
             // `Tests/` is the umbrella path; the sub-target test
             // directories below sit under it as separate testTargets.
@@ -304,6 +317,7 @@ let package = Package(
             exclude: [
                 "SimUseCoreTests",
                 "AndroidBackendTests",
+                "HarmonyOSBackendTests",
             ],
             resources: [
                 .copy("README.md"),
@@ -329,6 +343,11 @@ let package = Package(
             // it as a resource would emit a SwiftPM warning. Add a
             // `.copy("Fixtures")` entry when real fixture files
             // land.
+        ),
+        .testTarget(
+            name: "HarmonyOSBackendTests",
+            dependencies: ["HarmonyOSBackend", "SimUseCore"],
+            path: "Tests/HarmonyOSBackendTests"
         ),
         .plugin(
             name: "VersionPlugin",

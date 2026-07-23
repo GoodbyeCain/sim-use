@@ -3,6 +3,7 @@ import ArgumentParser
 import Foundation
 import SimUseCore
 import AndroidBackend
+import HarmonyOSBackend
 import iOSSimBackend
 
 /// `sim-use app-state` — a lightweight, cross-platform read of which apps
@@ -18,6 +19,8 @@ struct AppState: SimUseExecutableCommand {
         commandName: "app-state",
         abstract: AppStateHelp.abstract
     )
+
+    @OptionGroup var targetPlatform: TargetPlatformOptions
 
     @OptionGroup var device: DeviceOptions
 
@@ -42,10 +45,12 @@ struct AppState: SimUseExecutableCommand {
 
     var simulatorUDIDForDaemon: String? { device.resolved }
 
+    var daemonBypass: Bool { device.resolvedPlatform == .harmonyOS }
+
     var managesLivenessState: Bool { true }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve(allowPhysical: true)
+        try device.resolve(platform: targetPlatform.platform, allowPhysical: true)
     }
 
     // MARK: - Result
@@ -56,7 +61,7 @@ struct AppState: SimUseExecutableCommand {
 
     func execute() async throws -> ExecutionResult {
         let udid = device.resolved
-        switch PlatformRouter.resolve(udid: udid) {
+        switch device.resolvedPlatform {
         case .android:
             return try AndroidAppStateCommand.performAppState(
                 serial: udid, bundleId: bundleId, reset: reset
@@ -67,7 +72,9 @@ struct AppState: SimUseExecutableCommand {
                 reason: "there is no process-list channel for physical devices — the accessibility audit channel reads UI trees only, and crash detection is daemon state physical targets don't participate in yet.",
                 alternative: "Read the foreground app with `sim-use ui` instead; its outline header and content reflect what is currently on screen."
             )
-        case .iOSSim, .none:
+        case .harmonyOS:
+            throw CLIError(errorDescription: "HarmonyOS app-state is not available through the stable hdc process-list contract yet.")
+        case .iOSSim:
             break
         }
         let probed = BundleIdentifierResolver.appSnapshot(udid: udid)

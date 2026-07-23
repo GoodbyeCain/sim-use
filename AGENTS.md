@@ -162,3 +162,33 @@ The `bridge/` directory contains a Kotlin Android app (AccessibilityService + HT
 ### Bundling the APK
 
 The APK is gitignored (`Sources/AndroidBackend/Resources/*.apk`). Run `scripts/build-bridge.sh` before `make build` so the binary includes Android support.
+
+## HarmonyOS development
+
+`HarmonyOSBackend` uses SDK-provided `hdc`, UITest, and uinput commands. It does not install a device-side bridge. The same hdc target interface covers DevEco emulators, USB devices, and TCP devices.
+
+### Required tooling
+
+- DevEco Studio or the HarmonyOS/OpenHarmony command-line SDK.
+- `hdc` discoverable on `PATH`, through a standard SDK location, or via `SIM_USE_HDC=/absolute/path/to/hdc`.
+- Developer options plus USB or wireless debugging enabled and authorized on the target.
+- API 18+ for focused-field `uitest uiInput text`.
+
+### Routing and caches
+
+- Top-level verbs use `--platform harmonyos --device <connect-key>`.
+- `sim-use harmonyos <verb>` auto-selects only when one hdc target is online.
+- HarmonyOS outline caches use `harmonyos:<connect-key>` as the logical key.
+- Keep HarmonyOS commands off the daemon until daemon identity is namespaced by platform.
+
+### Verification
+
+Run `swift test --filter HarmonyOSBackendTests` for parser, dumpLayout, renderer, selector, and fake-hdc command tests. With a target connected, spot-check read-only operations first:
+
+```bash
+sim-use harmonyos ping --device <connect-key>
+sim-use ui --platform harmonyos --device <connect-key> --json
+sim-use harmonyos screenshot --device <connect-key> --output /tmp/harmonyos-smoke.png
+```
+
+Interaction verbs should be exercised against a disposable fixture app, not a personal device screen.

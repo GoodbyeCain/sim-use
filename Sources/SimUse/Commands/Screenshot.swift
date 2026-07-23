@@ -3,28 +3,31 @@ import ArgumentParser
 import Foundation
 import SimUseCore
 import AndroidBackend
+import HarmonyOSBackend
 import iOSSimBackend
 import iOSDeviceBackend
 
 /// Top-level cross-platform `screenshot` verb. Owns the flag surface
 /// and resolves the target platform, then delegates to the per-backend
 /// command (`IOSSimScreenshotCommand` for iOS Simulator UDIDs,
-/// `AndroidScreenshotCommand.performScreenshot` for adb serials).
+/// `AndroidScreenshotCommand.performScreenshot` for adb serials, or
+/// `HarmonyOSScreenshotCommand.performScreenshot` for hdc targets).
 ///
 /// Output path resolution differs slightly between platforms — the
 /// iOS default filename embeds the FBSimulator friendly name; the
-/// Android default uses the adb serial because the friendly name
-/// isn't available at the bridge layer. Both honour `--output`
+/// Android / HarmonyOS defaults use the transport identifier because
+/// the friendly name isn't available at the backend layer. All honour `--output`
 /// pointing at either a file or a directory.
 struct Screenshot: SimUseExecutableCommand {
     typealias ExecutionResult = IOSSimScreenshotCommand.ExecutionResult
 
     static let configuration = CommandConfiguration(
         commandName: "screenshot",
-        abstract: "Capture a screenshot from the simulator display and save it as a PNG file"
+        abstract: "Capture a screenshot from the target display and save it as a PNG file"
     )
 
     @OptionGroup var device: DeviceOptions
+    @OptionGroup var targetPlatform: TargetPlatformOptions
 
     @Option(help: "Output PNG file path. Defaults to 'Simulator Screenshot - <device name> - <timestamp>.png' in the current directory.")
     var output: String?
@@ -34,7 +37,7 @@ struct Screenshot: SimUseExecutableCommand {
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve(allowPhysical: true)
+        try device.resolve(platform: targetPlatform.platform, allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
@@ -49,7 +52,7 @@ struct Screenshot: SimUseExecutableCommand {
     }
 
     func execute() async throws -> ExecutionResult {
-        switch PlatformRouter.resolve(udid: device.resolved) {
+        switch device.resolvedPlatform {
         case .android:
             return try executeAndroid()
         case .iOSDevice:
@@ -60,7 +63,9 @@ struct Screenshot: SimUseExecutableCommand {
             // Android default embedding the serial.
             let result = try await IOSDeviceCommand.Screenshot.performScreenshot(udid: device.resolved, output: output)
             return ExecutionResult(path: result.path)
-        case .iOSSim, .none:
+        case .harmonyOS:
+            return try executeHarmonyOS()
+        case .iOSSim:
             return try await executeIOSSim()
         }
     }
@@ -89,6 +94,14 @@ struct Screenshot: SimUseExecutableCommand {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try png.write(to: url)
         return ExecutionResult(path: url.path)
+    }
+
+    private func executeHarmonyOS() throws -> ExecutionResult {
+        let path = try HarmonyOSScreenshotCommand.performScreenshot(
+            connectKey: device.resolved,
+            output: output
+        )
+        return ExecutionResult(path: path)
     }
 
     private func resolveAndroidOutputPath(serial: String) -> String {

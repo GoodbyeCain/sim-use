@@ -58,6 +58,25 @@ struct TapForwarderTests {
         }
     }
 
+    @Test("Explicit HarmonyOS override disambiguates adb-shaped connect keys")
+    func harmonyOSOverrideRoutesToHarmonyOS() {
+        #expect(PlatformRouter.resolve(
+            udid: "192.168.1.5:5555",
+            override: .harmonyos
+        ) == .harmonyOS)
+    }
+
+    @Test("HarmonyOS top-level tap bypasses the unqualified device daemon")
+    func harmonyOSTapBypassesDaemon() throws {
+        var command = try Tap.parse([
+            "--point", "100,200",
+            "--platform", "harmonyos",
+            "--device", "hdc-target",
+        ])
+        try command.resolveDeferredArguments()
+        #expect(command.daemonBypass)
+    }
+
     @Test("Empty UDID returns nil and forwarder defaults to iOSSim")
     func emptyUdidNilThenIOSDefault() {
         #expect(PlatformRouter.resolve(udid: "") == nil)

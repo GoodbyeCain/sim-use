@@ -3,6 +3,7 @@ import ArgumentParser
 import Foundation
 import SimUseCore
 import AndroidBackend
+import HarmonyOSBackend
 import iOSSimBackend
 
 /// Top-level cross-platform `swipe` verb. Owns the verb-specific flag
@@ -37,16 +38,18 @@ struct Swipe: SimUseExecutableCommand {
     var postDelay: Double?
 
     @OptionGroup var device: DeviceOptions
+    @OptionGroup var targetPlatform: TargetPlatformOptions
 
     @OptionGroup var json: JSONOutputOptions
 
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve(allowPhysical: true)
+        try device.resolve(platform: targetPlatform.platform, allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
+    var daemonBypass: Bool { device.resolvedPlatform == .harmonyOS }
 
     /// Mirror `Tap` / `Button`'s "✓ … completed successfully" line.
     /// Without this the cross-platform `sim-use swipe` is silent on
@@ -74,7 +77,7 @@ struct Swipe: SimUseExecutableCommand {
     }
 
     func execute() async throws -> ExecutionResult {
-        switch PlatformRouter.resolve(udid: device.resolved) {
+        switch device.resolvedPlatform {
         case .android:
             return try await executeAndroid()
         case .iOSDevice:
@@ -83,7 +86,9 @@ struct Swipe: SimUseExecutableCommand {
                 reason: "swipes are coordinate HID sequences, and the accessibility audit channel exposes no coordinate input or element geometry.",
                 alternative: "Interact through accessibility actions instead: `sim-use ui` reads the outline, then `sim-use tap '#<id>' / --label` activates an element. Scrolling on physical devices is not available yet."
             )
-        case .iOSSim, .none:
+        case .harmonyOS:
+            return try await executeHarmonyOS()
+        case .iOSSim:
             return try await executeIOSSim()
         }
     }
@@ -129,6 +134,22 @@ struct Swipe: SimUseExecutableCommand {
             endX: coords.roundedEndX,
             endY: coords.roundedEndY,
             durationMs: durationMs
+        )
+        if let postDelay, postDelay > 0 {
+            try await Task.sleep(nanoseconds: UInt64(postDelay * 1_000_000_000))
+        }
+        return ExecutionResult(coordinates: coords)
+    }
+
+    private func executeHarmonyOS() async throws -> ExecutionResult {
+        let coords = try coordinates.resolve()
+        if let preDelay, preDelay > 0 {
+            try await Task.sleep(nanoseconds: UInt64(preDelay * 1_000_000_000))
+        }
+        try HarmonyOSSwipeCommand.performSwipe(
+            connectKey: device.resolved,
+            coordinates: coords,
+            duration: duration ?? 0.3
         )
         if let postDelay, postDelay > 0 {
             try await Task.sleep(nanoseconds: UInt64(postDelay * 1_000_000_000))

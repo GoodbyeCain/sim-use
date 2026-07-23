@@ -5,8 +5,8 @@ import Foundation
 /// when a positional argument starts with `@` or `#`.
 ///
 /// The cache is a tiny JSON document at `~/.sim-use/<udid>/last-outline.json`
-/// written every time `describe-ui` finishes a successful snapshot. Both
-/// iOS and Android backends share this code so cross-platform skills can
+/// written every time `describe-ui` finishes a successful snapshot. All
+/// platform backends share this code so cross-platform skills can
 /// resolve aliases uniformly. See `DESCRIBE_UI_OUTLINE.md` §5 for the
 /// normative schema.
 public enum OutlineCache {
@@ -19,8 +19,8 @@ public enum OutlineCache {
         public let screen: Size
         public let entries: [Entry]
         /// Calibrated interface orientation at capture time (iOS
-        /// `DisplayOrientation` raw value; nil on Android and in caches
-        /// written before the field existed). Diagnostic — coordinates
+        /// `DisplayOrientation` raw value; nil on Android / HarmonyOS and
+        /// in caches written before the field existed). Diagnostic — coordinates
         /// in `entries` are always UI space regardless.
         public let orientation: String?
 

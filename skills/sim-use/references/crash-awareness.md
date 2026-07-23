@@ -2,6 +2,8 @@
 
 sim-use automatically tracks the target app's process liveness while the daemon is running. When the tracked process disappears between commands, sim-use surfaces a banner on the next `ui` call.
 
+This protocol currently applies to iOS and Android. HarmonyOS commands bypass the daemon, and `app-state` / process-liveness tracking are not yet available there; do not infer crash status from a HarmonyOS `ui` result alone.
+
 ## Signals
 
 ### Process liveness (iOS + Android)

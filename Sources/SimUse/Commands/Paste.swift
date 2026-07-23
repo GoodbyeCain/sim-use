@@ -3,6 +3,7 @@ import ArgumentParser
 import Foundation
 import SimUseCore
 import AndroidBackend
+import HarmonyOSBackend
 import iOSSimBackend
 
 /// Top-level cross-platform `paste` verb. Owns the flag surface and
@@ -70,6 +71,8 @@ struct Paste: SimUseExecutableCommand {
     @Option(name: .customLong("menu-timeout"), help: "Seconds to wait for each edit-menu transition (default: 2.0).")
     var menuTimeout: Double = 2.0
 
+    @OptionGroup var targetPlatform: TargetPlatformOptions
+
     @OptionGroup var device: DeviceOptions
 
     @OptionGroup var json: JSONOutputOptions
@@ -77,10 +80,12 @@ struct Paste: SimUseExecutableCommand {
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve(allowPhysical: true)
+        try device.resolve(platform: targetPlatform.platform, allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
+
+    var daemonBypass: Bool { device.resolvedPlatform == .harmonyOS }
 
     func daemonArguments(from arguments: [String]) throws -> [String] {
         try IOSSimPasteCommand.daemonArguments(from: arguments, useStdin: useStdin, inputFile: inputFile)
@@ -100,7 +105,7 @@ struct Paste: SimUseExecutableCommand {
     }
 
     func execute() async throws -> ExecutionResult {
-        switch PlatformRouter.resolve(udid: device.resolved) {
+        switch device.resolvedPlatform {
         case .android:
             return try executeAndroid()
         case .iOSDevice:
@@ -109,7 +114,9 @@ struct Paste: SimUseExecutableCommand {
                 reason: "the accessibility audit channel exposes no pasteboard or text-input access.",
                 alternative: "Text input on physical iOS devices is not available yet. If the step only needs an activation, use `sim-use tap '#<id>' / --label`."
             )
-        case .iOSSim, .none:
+        case .harmonyOS:
+            return try await executeHarmonyOS()
+        case .iOSSim:
             return try await executeIOSSim()
         }
     }
@@ -160,6 +167,21 @@ struct Paste: SimUseExecutableCommand {
             text: inputText,
             replace: replace
         )
+        return ExecutionResult()
+    }
+
+    private func executeHarmonyOS() throws -> ExecutionResult {
+        if viaMenu {
+            throw CLIError(errorDescription: "--via-menu is iOS-only. HarmonyOS uses UITest text injection at the focused field.")
+        }
+        if replace {
+            throw CLIError(errorDescription: "HarmonyOS paste --replace is not available through the stable UITest CLI. Clear the field first, then run paste/type.")
+        }
+        let inputText = try IOSSimPasteCommand.resolveInputText(
+            text: text, useStdin: useStdin, inputFile: inputFile, logger: nil
+        )
+        guard !inputText.isEmpty else { throw CLIError(errorDescription: "Input text is empty; nothing to paste.") }
+        try HarmonyOSTypeCommand.performType(connectKey: device.resolved, text: inputText)
         return ExecutionResult()
     }
 }

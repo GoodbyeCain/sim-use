@@ -211,6 +211,25 @@ sim-use drives both **iOS Simulators** and **Android devices / emulators** throu
   * `emulator-5554` / `R5CT1ABCD12` / `192.168.1.5:5555` → Android device
   * `00008130-...` (8-16 hex) / 40-hex → physical iPhone/iPad (restricted verb set)
 
+  * HarmonyOS hdc connect-key → HarmonyOS, selected explicitly with `--platform harmonyos`
+
+Android and HarmonyOS identifiers are not disjoint: both may be opaque serials or `IP:port`. Top-level HarmonyOS calls therefore require an explicit platform override:
+
+```bash
+sim-use ui --platform harmonyos --device <connect-key>
+sim-use tap @5 --platform harmonyos --device <connect-key>
+```
+
+The HarmonyOS namespace avoids repeating the platform and auto-selects the target when exactly one online hdc target exists:
+
+```bash
+sim-use harmonyos devices
+sim-use harmonyos ui
+sim-use harmonyos tap @5
+```
+
+HarmonyOS support uses the SDK-provided `hdc`, `uitest`, and `uinput` tools directly; no device-side bridge app is installed. `hdc` provides the same transport for USB physical devices, TCP devices, and DevEco emulators. Install DevEco Studio or the command-line HarmonyOS/OpenHarmony SDK, put `hdc` on `PATH`, or set `SIM_USE_HDC` to its absolute path. Text injection through `uitest uiInput text` requires API 18 or newer.
+
 For Android, run `sim-use android init --device <serial>` once to install the bridge APK. See `AGENTS.md` for Android toolchain setup. When `ADB_SERVER_SOCKET` points at an adb server on another machine (`tcp:<host>:<port>`), sim-use reaches the bridge on that host, since that is where `adb forward` listens; `SIM_USE_BRIDGE_HOST` overrides the host.
 
 **Physical iPhones and iPads** (experimental) route through the same top-level verbs — `sim-use ui`, `sim-use tap '#<id>' / --label` and `sim-use screenshot` work against a plugged-in device's UDID. The channel exposes no element geometry, so it trades coordinate taps, swipes and gestures for accessibility actions, and the remaining verbs reject with the reason and the nearest alternative — never assume capability parity; see the [capability matrix](#physical-ios-devices). sim-use installs and signs no runner and needs no Developer Disk Image; `ui`/`tap` need the foreground app to be development-signed (`get-task-allow=true`), `screenshot` captures any screen.
