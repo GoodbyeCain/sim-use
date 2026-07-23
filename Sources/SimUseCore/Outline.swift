@@ -4,7 +4,7 @@ import Foundation
 /// Structured result of rendering an accessibility tree to the outline
 /// format defined in `DESCRIBE_UI_OUTLINE.md`.
 ///
-/// Cross-platform shape consumed by both iOS and Android backends.
+/// Cross-platform shape consumed by the iOS, Android, and HarmonyOS backends.
 /// `text` is the human-facing stdout payload for `describe-ui`. `entries`
 /// is the same information in structured form and is what `--json`
 /// surfaces and what the `@N`/`#N` alias cache is derived from. `lists`

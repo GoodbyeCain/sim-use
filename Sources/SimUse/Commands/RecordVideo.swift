@@ -19,10 +19,11 @@ struct RecordVideo: SimUseExecutableCommand {
 
     static let configuration = CommandConfiguration(
         commandName: "record-video",
-        abstract: "Record the simulator display to an MP4 (H.264) or animated GIF file"
+        abstract: "Record a supported target display to an MP4 (H.264) or animated GIF file"
     )
 
     @OptionGroup var device: DeviceOptions
+    @OptionGroup var targetPlatform: TargetPlatformOptions
 
     @Option(help: "Frames per second (1-60; default: 30 for mp4, 10 for gif). Ignored by Android capture (screenrecord uses the device's native variable frame rate), but still applied when sampling a GIF.")
     var fps: Int?
@@ -47,7 +48,7 @@ struct RecordVideo: SimUseExecutableCommand {
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve(allowPhysical: true)
+        try device.resolve(platform: targetPlatform.platform, allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
@@ -66,7 +67,7 @@ struct RecordVideo: SimUseExecutableCommand {
     }
 
     func execute() async throws -> ExecutionResult {
-        switch PlatformRouter.resolve(udid: device.resolved) {
+        switch device.resolvedPlatform {
         case .android:
             return try await executeAndroid()
         case .iOSDevice:
@@ -75,7 +76,9 @@ struct RecordVideo: SimUseExecutableCommand {
                 reason: "video capture is not wired up for physical devices (CoreDevice screen recording is capability-gated per device).",
                 alternative: "Capture stills instead: `sim-use screenshot` works on any screen, system apps included."
             )
-        case .iOSSim, .none:
+        case .harmonyOS:
+            throw CLIError(errorDescription: "HarmonyOS record-video is not available yet; use screenshot for still captures. hdc/UITest has no stable streaming capture command across simulator and physical-device versions.")
+        case .iOSSim:
             return try await executeIOSSim()
         }
     }

@@ -3,6 +3,7 @@ import ArgumentParser
 import Foundation
 import SimUseCore
 import AndroidBackend
+import HarmonyOSBackend
 import iOSSimBackend
 import iOSDeviceBackend
 
@@ -19,8 +20,8 @@ struct Tap: SimUseExecutableCommand {
         discussion: """
         Workflow: run `sim-use describe-ui` first to capture an
         outline of the current screen — every visible element gets an
-        `@N` alias and (when applicable) a `#N` / `#N@M` list-cell
-        alias. Then pass that alias positionally to `tap`. The
+        `@N` alias; iOS / Android list detection may also add a `#N` /
+        `#N@M` list-cell alias. Then pass that alias positionally to `tap`. The
         snapshot is cached at `~/.sim-use/<udid>/last-outline.json`;
         re-run `describe-ui` whenever the UI changes (after a
         navigation, scroll, modal open / close).
@@ -47,8 +48,9 @@ struct Tap: SimUseExecutableCommand {
         field listing candidate labels so an agent can re-target
         without re-running `describe-ui`.
 
-        Works on both iOS Simulators and connected Android devices;
-        the UDID shape (UUID vs adb serial) decides the backend.
+        Works on iOS Simulators plus connected Android and HarmonyOS
+        devices. HarmonyOS requires `--platform harmonyos` because hdc
+        and adb identifiers can have the same shape.
 
         Examples:
           sim-use describe-ui                                          # populate the outline cache first
@@ -66,7 +68,7 @@ struct Tap: SimUseExecutableCommand {
     )
 
     @Argument(help: ArgumentHelp(
-        "Shortcut alias for the element to tap. `@N` selects the N-th entry of the most recent `describe-ui` snapshot; `#N` selects the N-th cell of the dominant detected list; `#N@M` selects the N-th cell of the M-th list (1-indexed, M=1 = dominant); `#<id>` resolves an AXUniqueId via the live AX tree. Exclusive with --point/-x/-y and --id/--label/--value.",
+        "Shortcut alias for the element to tap. `@N` selects the N-th entry of the most recent `describe-ui` snapshot; on iOS / Android, `#N` selects the N-th cell of the dominant detected list and `#N@M` selects the N-th cell of the M-th list (1-indexed, M=1 = dominant); `#<id>` resolves a platform identifier via the live tree. Exclusive with --point/-x/-y and --id/--label/--value.",
         valueName: "alias"
     ))
     var alias: String?
@@ -86,16 +88,18 @@ struct Tap: SimUseExecutableCommand {
     @OptionGroup var multiTouch: MultiTouchOptions
 
     @OptionGroup var device: DeviceOptions
+    @OptionGroup var targetPlatform: TargetPlatformOptions
 
     @OptionGroup var json: JSONOutputOptions
 
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve(allowPhysical: true)
+        try device.resolve(platform: targetPlatform.platform, allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
+    var daemonBypass: Bool { device.resolvedPlatform == .harmonyOS }
 
     typealias ExecutionResult = IOSSimTapCommand.ExecutionResult
 
@@ -111,12 +115,14 @@ struct Tap: SimUseExecutableCommand {
     }
 
     func execute() async throws -> ExecutionResult {
-        switch PlatformRouter.resolve(udid: device.resolved) {
+        switch device.resolvedPlatform {
         case .android:
             return try executeAndroid()
         case .iOSDevice:
             return try await executeIOSDevice()
-        case .iOSSim, .none:
+        case .harmonyOS:
+            return try await executeHarmonyOS()
+        case .iOSSim:
             // .none here means the UDID didn't match either platform
             // shape; defer to iOS so the existing "not booted /
             // not found" message surfaces (preserving pre-refactor
@@ -311,5 +317,56 @@ struct Tap: SimUseExecutableCommand {
         case .id, .none:
             return nil
         }
+    }
+
+    private func executeHarmonyOS() async throws -> ExecutionResult {
+        let frameFilter = targeting.frameSpecs.isEmpty
+            ? nil
+            : try? SelectorFrameFilter(specs: targeting.frameSpecs)
+        let selector = HarmonySelector(
+            id: targeting.elementID,
+            label: targeting.elementLabel,
+            labelContains: targeting.labelContains,
+            labelRegex: targeting.labelRegex,
+            value: targeting.elementValue,
+            elementType: targeting.elementType,
+            frame: frameFilter
+        )
+        let explicit = try TapCoordinateResolver.resolve(
+            x: targeting.pointX, y: targeting.pointY, point: targeting.point
+        )
+        if multiTouch.fingers == 2 {
+            guard let point = explicit else {
+                throw CLIError(errorDescription: "HarmonyOS two-finger tap currently requires an explicit coordinate (--point or -x/-y).")
+            }
+            if let preDelay = timing.preDelay, preDelay > 0 {
+                try await Task.sleep(nanoseconds: UInt64(preDelay * 1_000_000_000))
+            }
+            let finger1 = (x: point.x, y: point.y)
+            let finger2 = multiTouch.fingerTwoPoint(forFinger1: finger1)
+            try HarmonyOSMultiTouchCommand.performMultiTouch(
+                connectKey: device.resolved,
+                startP1: (finger1.x, finger1.y), startP2: (finger2.x, finger2.y),
+                endP1: (finger1.x, finger1.y), endP2: (finger2.x, finger2.y),
+                duration: duration ?? 0.05
+            )
+            if let postDelay = timing.postDelay, postDelay > 0 {
+                try await Task.sleep(nanoseconds: UInt64(postDelay * 1_000_000_000))
+            }
+            return ExecutionResult(x: finger1.x, y: finger1.y)
+        }
+        let result = try await HarmonyOSTapCommand.performTap(
+            connectKey: device.resolved,
+            alias: alias,
+            x: explicit.map { Int($0.x.rounded()) },
+            y: explicit.map { Int($0.y.rounded()) },
+            selector: selector,
+            duration: duration,
+            preDelay: timing.preDelay,
+            postDelay: timing.postDelay,
+            waitTimeout: timing.waitTimeout,
+            pollInterval: timing.pollInterval
+        )
+        return ExecutionResult(x: Double(result.x), y: Double(result.y))
     }
 }

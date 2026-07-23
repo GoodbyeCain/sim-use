@@ -20,6 +20,7 @@ struct AppState: SimUseExecutableCommand {
     )
 
     @OptionGroup var device: DeviceOptions
+    @OptionGroup var targetPlatform: TargetPlatformOptions
 
     @Option(
         name: .customLong("bundle-id"),
@@ -41,11 +42,12 @@ struct AppState: SimUseExecutableCommand {
     var jsonOutput: Bool { json.enabled }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
+    var daemonBypass: Bool { device.resolvedPlatform == .harmonyOS }
 
     var managesLivenessState: Bool { true }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve(allowPhysical: true)
+        try device.resolve(platform: targetPlatform.platform, allowPhysical: true)
     }
 
     // MARK: - Result
@@ -73,7 +75,7 @@ struct AppState: SimUseExecutableCommand {
     func execute() async throws -> ExecutionResult {
         let udid = device.resolved
         let isAndroid: Bool
-        switch PlatformRouter.resolve(udid: udid) {
+        switch device.resolvedPlatform {
         case .android:
             isAndroid = true
         case .iOSDevice:
@@ -82,8 +84,10 @@ struct AppState: SimUseExecutableCommand {
                 reason: "there is no process-list channel for physical devices — the accessibility audit channel reads UI trees only, and crash detection is daemon state physical targets don't participate in yet.",
                 alternative: "Read the foreground app with `sim-use ui` instead; its outline header and content reflect what is currently on screen."
             )
-        case .iOSSim, .none:
+        case .iOSSim:
             isAndroid = false
+        case .harmonyOS:
+            throw CLIError(errorDescription: "HarmonyOS app-state is not available through the stable hdc process-list contract yet.")
         }
         let probed = isAndroid
             ? AndroidProcessLister.appSnapshot(serial: udid)

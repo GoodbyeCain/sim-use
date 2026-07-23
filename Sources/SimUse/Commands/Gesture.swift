@@ -3,20 +3,22 @@ import ArgumentParser
 import Foundation
 import SimUseCore
 import AndroidBackend
+import HarmonyOSBackend
 import iOSSimBackend
 
 /// Top-level cross-platform `gesture` verb. Owns the flag surface
 /// and resolves the target platform, then delegates to the per-backend
 /// command (`IOSSimGestureCommand` for iOS Simulator UDIDs,
-/// `AndroidGestureCommand.performGesture` for adb serials).
+/// `AndroidGestureCommand.performGesture` for adb serials, or hdc
+/// uinput primitives for HarmonyOS targets).
 ///
-/// `--delta` is iOS-HID-specific and silently ignored on Android
-/// (dispatchGesture interpolates the stroke internally).
+/// `--delta` is iOS-HID-specific and silently ignored on Android /
+/// HarmonyOS (their input primitives interpolate internally).
 struct Gesture: SimUseExecutableCommand {
     typealias ExecutionResult = IOSSimGestureCommand.ExecutionResult
 
     static let configuration = CommandConfiguration(
-        abstract: "Perform preset gesture patterns on the simulator.",
+        abstract: "Perform preset gesture patterns on the target screen.",
         discussion: """
         Execute common gesture patterns without specifying coordinates.
 
@@ -47,6 +49,10 @@ struct Gesture: SimUseExecutableCommand {
             (auto-detected via the bridge). --delta, --steps, --step-ms are
             iOS-HID-specific and silently ignored on Android, since
             dispatchGesture interpolates the stroke internally.
+          * HarmonyOS — coordinates default to the UITest dumpLayout screen.
+            Single-finger and pinch presets use linear uinput moves. Rotate
+            presets are unsupported because the CLI does not expose curved
+            multi-step paths.
         """
     )
 
@@ -93,16 +99,18 @@ struct Gesture: SimUseExecutableCommand {
     var postDelay: Double?
 
     @OptionGroup var device: DeviceOptions
+    @OptionGroup var targetPlatform: TargetPlatformOptions
 
     @OptionGroup var json: JSONOutputOptions
 
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve(allowPhysical: true)
+        try device.resolve(platform: targetPlatform.platform, allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
+    var daemonBypass: Bool { device.resolvedPlatform == .harmonyOS }
 
     func format(_ result: ExecutionResult) -> CommandOutput { .empty }
 
@@ -126,7 +134,7 @@ struct Gesture: SimUseExecutableCommand {
     }
 
     func execute() async throws -> ExecutionResult {
-        switch PlatformRouter.resolve(udid: device.resolved) {
+        switch device.resolvedPlatform {
         case .android:
             return try await executeAndroid()
         case .iOSDevice:
@@ -135,7 +143,9 @@ struct Gesture: SimUseExecutableCommand {
                 reason: "gesture presets are coordinate HID sequences, and the accessibility audit channel exposes no coordinate input or element geometry.",
                 alternative: "Interact through accessibility actions instead: `sim-use ui` reads the outline, then `sim-use tap '#<id>' / --label` activates an element. Scrolling on physical devices is not available yet."
             )
-        case .iOSSim, .none:
+        case .harmonyOS:
+            return try await executeHarmonyOS()
+        case .iOSSim:
             return try await executeIOSSim()
         }
     }
@@ -194,6 +204,61 @@ struct Gesture: SimUseExecutableCommand {
             preDelay: nil,
             postDelay: nil
         )
+        if let postDelay, postDelay > 0 {
+            try await Task.sleep(nanoseconds: UInt64(postDelay * 1_000_000_000))
+        }
+        return ExecutionResult()
+    }
+
+    private func executeHarmonyOS() async throws -> ExecutionResult {
+        if preset == .rotateCw || preset == .rotateCcw {
+            throw CLIError(errorDescription: "HarmonyOS uinput does not expose a continuous curved two-finger path; rotate presets are unavailable. Use multi-touch for linear two-finger gestures.")
+        }
+        if let preDelay, preDelay > 0 {
+            try await Task.sleep(nanoseconds: UInt64(preDelay * 1_000_000_000))
+        }
+        let size: (width: Double, height: Double)
+        if let screenWidth, let screenHeight {
+            size = (screenWidth, screenHeight)
+        } else {
+            let snapshot = try HarmonyOSDescribeUICommand.performDescribeUI(
+                connectKey: device.resolved,
+                includeOffscreen: false,
+                includeRaw: false
+            )
+            size = (
+                screenWidth ?? Double(snapshot.screen.width),
+                screenHeight ?? Double(snapshot.screen.height)
+            )
+        }
+        let strokes = preset.strokes(
+            screenWidth: size.width,
+            screenHeight: size.height,
+            scale: scale,
+            angle: angle,
+            centerX: centerX,
+            centerY: centerY,
+            radius: radius
+        )
+        let effectiveDuration = duration ?? preset.recommendedDuration(angle: angle)
+        let controller = HarmonyDeviceController()
+        if strokes.count == 1, let stroke = strokes.first {
+            try controller.swipe(
+                connectKey: device.resolved,
+                startX: Int(stroke.startX.rounded()), startY: Int(stroke.startY.rounded()),
+                endX: Int(stroke.endX.rounded()), endY: Int(stroke.endY.rounded()),
+                duration: effectiveDuration
+            )
+        } else if strokes.count == 2 {
+            try controller.multiTouch(
+                connectKey: device.resolved,
+                startP1: (strokes[0].startX, strokes[0].startY),
+                startP2: (strokes[1].startX, strokes[1].startY),
+                endP1: (strokes[0].endX, strokes[0].endY),
+                endP2: (strokes[1].endX, strokes[1].endY),
+                duration: effectiveDuration
+            )
+        }
         if let postDelay, postDelay > 0 {
             try await Task.sleep(nanoseconds: UInt64(postDelay * 1_000_000_000))
         }

@@ -3,17 +3,19 @@ import ArgumentParser
 import Foundation
 import SimUseCore
 import AndroidBackend
+import HarmonyOSBackend
 import iOSSimBackend
 
 /// Top-level cross-platform `long-press` verb. Mirrors `Tap`'s entire
 /// flag surface (selectors, frame filter, delays, wait/poll, UDID,
 /// JSON) — the only difference is `--duration` defaults to 0.8s so
 /// `sim-use long-press @5` is a one-liner that crosses the OS
-/// long-press threshold on both platforms:
+/// long-press threshold on all supported platforms:
 ///   • iOS: HID `touchDownAt → sleep → touchUpAt` (split submission so
 ///     UILongPressGestureRecognizer observes a real hold).
 ///   • Android: `dispatchGesture` with a single `start == end` stroke
 ///     of the requested duration, dispatched through bridge `/swipe`.
+///   • HarmonyOS: uinput down → interval → up on the resolved point.
 ///
 /// Implementation is intentionally a thin shell: routing and per-
 /// platform forwarding are copies of `Tap.executeIOSSim` /
@@ -28,7 +30,7 @@ struct LongPress: SimUseExecutableCommand {
         discussion: """
         Sugar over `sim-use tap --duration <seconds>` with `--duration`
         defaulting to 0.8s, the standard threshold that triggers
-        long-press recognisers on both iOS and Android (above
+        long-press recognisers on iOS, Android, and HarmonyOS (above
         `UILongPressGestureRecognizer.minimumPressDuration` and
         `ViewConfiguration.getLongPressTimeout()`). Useful for
         chat-bubble action menus, launcher icon popups, and any UI
@@ -52,7 +54,7 @@ struct LongPress: SimUseExecutableCommand {
     )
 
     @Argument(help: ArgumentHelp(
-        "Shortcut alias for the element to long-press. `@N` selects the N-th entry of the most recent `describe-ui` snapshot; `#N` selects the N-th cell of the dominant detected list; `#N@M` selects the N-th cell of the M-th list (1-indexed, M=1 = dominant); `#<id>` resolves an AXUniqueId via the live AX tree. Exclusive with --point/-x/-y and --id/--label/--value.",
+        "Shortcut alias for the element to long-press. `@N` selects the N-th entry of the most recent `describe-ui` snapshot; on iOS / Android, `#N` selects the N-th cell of the dominant detected list and `#N@M` selects the N-th cell of the M-th list (1-indexed, M=1 = dominant); `#<id>` resolves a platform identifier via the live tree. Exclusive with --point/-x/-y and --id/--label/--value.",
         valueName: "alias"
     ))
     var alias: String?
@@ -62,7 +64,7 @@ struct LongPress: SimUseExecutableCommand {
     @Option(
         name: .customLong("duration"),
         help: ArgumentHelp(
-            "How long to hold the touch in seconds. Defaults to 0.8 — clears the OS long-press threshold on both iOS (~0.5s) and Android (~0.5s) with margin. Increase if a stubborn recogniser needs more time; values above 10s are rejected."
+            "How long to hold the touch in seconds. Defaults to 0.8 — clears the common OS long-press threshold (~0.5s) with margin. Increase if a stubborn recogniser needs more time; values above 10s are rejected."
         )
     )
     var duration: Double = 0.8
@@ -72,16 +74,18 @@ struct LongPress: SimUseExecutableCommand {
     @OptionGroup var multiTouch: MultiTouchOptions
 
     @OptionGroup var device: DeviceOptions
+    @OptionGroup var targetPlatform: TargetPlatformOptions
 
     @OptionGroup var json: JSONOutputOptions
 
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve(allowPhysical: true)
+        try device.resolve(platform: targetPlatform.platform, allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
+    var daemonBypass: Bool { device.resolvedPlatform == .harmonyOS }
 
     typealias ExecutionResult = IOSSimTapCommand.ExecutionResult
 
@@ -99,7 +103,7 @@ struct LongPress: SimUseExecutableCommand {
     }
 
     func execute() async throws -> ExecutionResult {
-        switch PlatformRouter.resolve(udid: device.resolved) {
+        switch device.resolvedPlatform {
         case .android:
             return try executeAndroid()
         case .iOSDevice:
@@ -108,7 +112,9 @@ struct LongPress: SimUseExecutableCommand {
                 reason: "the audit channel's only exposed action is Activate — there is no coordinate input or press-duration control.",
                 alternative: "Use `sim-use tap '#<id>' / --label` for a plain activation; long-press gestures are not available on physical iOS devices."
             )
-        case .iOSSim, .none:
+        case .harmonyOS:
+            return try await executeHarmonyOS()
+        case .iOSSim:
             return try await executeIOSSim()
         }
     }
@@ -171,6 +177,40 @@ struct LongPress: SimUseExecutableCommand {
             selector: selector,
             duration: duration,
             multiTouch: multiTouch
+        )
+        return ExecutionResult(x: Double(result.x), y: Double(result.y))
+    }
+
+    private func executeHarmonyOS() async throws -> ExecutionResult {
+        guard multiTouch.fingers == 1 else {
+            throw CLIError(errorDescription: "HarmonyOS long-press currently supports one finger; use `multi-touch` for an explicit two-finger hold.")
+        }
+        let frameFilter = targeting.frameSpecs.isEmpty
+            ? nil
+            : try? SelectorFrameFilter(specs: targeting.frameSpecs)
+        let selector = HarmonySelector(
+            id: targeting.elementID,
+            label: targeting.elementLabel,
+            labelContains: targeting.labelContains,
+            labelRegex: targeting.labelRegex,
+            value: targeting.elementValue,
+            elementType: targeting.elementType,
+            frame: frameFilter
+        )
+        let explicit = try TapCoordinateResolver.resolve(
+            x: targeting.pointX, y: targeting.pointY, point: targeting.point
+        )
+        let result = try await HarmonyOSTapCommand.performTap(
+            connectKey: device.resolved,
+            alias: alias,
+            x: explicit.map { Int($0.x.rounded()) },
+            y: explicit.map { Int($0.y.rounded()) },
+            selector: selector,
+            duration: duration,
+            preDelay: timing.preDelay,
+            postDelay: timing.postDelay,
+            waitTimeout: timing.waitTimeout,
+            pollInterval: timing.pollInterval
         )
         return ExecutionResult(x: Double(result.x), y: Double(result.y))
     }

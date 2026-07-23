@@ -3,6 +3,7 @@ import ArgumentParser
 import Foundation
 import SimUseCore
 import AndroidBackend
+import HarmonyOSBackend
 import iOSSimBackend
 
 /// Top-level cross-platform `touch` verb. Owns the flag surface and
@@ -16,6 +17,8 @@ import iOSSimBackend
 ///   * Android — only the atomic form. Split form is rejected during
 ///     deferred-argument resolution with a redirect message produced
 ///     by `AndroidTouchCommand.splitFormRedirect`.
+///   * HarmonyOS — full down/up support through hdc uinput. Separate
+///     invocations are delivered by the device's input subsystem.
 struct Touch: SimUseExecutableCommand {
     typealias ExecutionResult = IOSSimTouchCommand.ExecutionResult
 
@@ -40,6 +43,8 @@ struct Touch: SimUseExecutableCommand {
             it has no API to keep a stroke open across separate calls.
             `--down` or `--up` alone will exit with a redirect to the
             atomic form.
+          * HarmonyOS — down, up, and atomic delayed forms are supported
+            through `hdc shell uinput -T`.
         """
     )
 
@@ -62,14 +67,15 @@ struct Touch: SimUseExecutableCommand {
     var coordinateSpace: CoordinateSpace = .native
 
     @OptionGroup var device: DeviceOptions
+    @OptionGroup var targetPlatform: TargetPlatformOptions
 
     @OptionGroup var json: JSONOutputOptions
 
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve(allowPhysical: true)
-        if PlatformRouter.looksLikeAndroid(device.resolved) {
+        try device.resolve(platform: targetPlatform.platform, allowPhysical: true)
+        if device.resolvedPlatform == .android {
             try rejectAndroidSplitForm()
         }
     }
@@ -83,6 +89,7 @@ struct Touch: SimUseExecutableCommand {
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
+    var daemonBypass: Bool { device.resolvedPlatform == .harmonyOS }
 
     func format(_ result: ExecutionResult) -> CommandOutput { .empty }
 
@@ -97,7 +104,7 @@ struct Touch: SimUseExecutableCommand {
     }
 
     func execute() async throws -> ExecutionResult {
-        switch PlatformRouter.resolve(udid: device.resolved) {
+        switch device.resolvedPlatform {
         case .android:
             return try executeAndroid()
         case .iOSDevice:
@@ -106,7 +113,9 @@ struct Touch: SimUseExecutableCommand {
                 reason: "touch down/up events are coordinate HID, and the accessibility audit channel exposes no coordinate input.",
                 alternative: "Interact through accessibility actions instead: `sim-use ui` reads the outline, then `sim-use tap '#<id>' / --label` activates an element."
             )
-        case .iOSSim, .none:
+        case .harmonyOS:
+            return try executeHarmonyOS()
+        case .iOSSim:
             return try await executeIOSSim()
         }
     }
@@ -140,6 +149,15 @@ struct Touch: SimUseExecutableCommand {
             udid: device.resolved,
             x: pointX, y: pointY,
             delay: delay
+        )
+        return ExecutionResult()
+    }
+
+    private func executeHarmonyOS() throws -> ExecutionResult {
+        try HarmonyDeviceController().touch(
+            connectKey: device.resolved,
+            x: Int(pointX.rounded()), y: Int(pointY.rounded()),
+            down: touchDown, up: touchUp, delay: delay
         )
         return ExecutionResult()
     }

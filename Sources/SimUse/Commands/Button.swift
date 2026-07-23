@@ -3,6 +3,7 @@ import ArgumentParser
 import Foundation
 import SimUseCore
 import AndroidBackend
+import HarmonyOSBackend
 import iOSSimBackend
 
 /// Top-level cross-platform `button` verb. Owns the flag surface and
@@ -19,7 +20,7 @@ struct Button: SimUseExecutableCommand {
     typealias ExecutionResult = IOSSimButtonCommand.ExecutionResult
 
     static let configuration = CommandConfiguration(
-        abstract: "Press a hardware button on the simulator or Android device.",
+        abstract: "Press a hardware button on an iOS Simulator, Android device, or HarmonyOS target.",
         discussion: """
         iOS:     home, lock, apple-pay, side-button, siri
         Android: home, back, lock, recents
@@ -38,16 +39,18 @@ struct Button: SimUseExecutableCommand {
     var duration: Double?
 
     @OptionGroup var device: DeviceOptions
+    @OptionGroup var targetPlatform: TargetPlatformOptions
 
     @OptionGroup var json: JSONOutputOptions
 
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve(allowPhysical: true)
+        try device.resolve(platform: targetPlatform.platform, allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
+    var daemonBypass: Bool { device.resolvedPlatform == .harmonyOS }
 
     func format(_ result: ExecutionResult) -> CommandOutput {
         .line("✓ \(buttonType.description) press completed successfully")
@@ -58,7 +61,7 @@ struct Button: SimUseExecutableCommand {
     }
 
     func execute() async throws -> ExecutionResult {
-        switch PlatformRouter.resolve(udid: device.resolved) {
+        switch device.resolvedPlatform {
         case .android:
             return try executeAndroid()
         case .iOSDevice:
@@ -67,7 +70,9 @@ struct Button: SimUseExecutableCommand {
                 reason: "hardware-button events are injected through the simulator HID channel, which physical devices do not expose.",
                 alternative: "Press the button on the device itself, or drive on-screen UI with `sim-use ui` + `sim-use tap '#<id>' / --label`."
             )
-        case .iOSSim, .none:
+        case .harmonyOS:
+            return try executeHarmonyOS()
+        case .iOSSim:
             return try await executeIOSSim()
         }
     }
@@ -103,6 +108,17 @@ struct Button: SimUseExecutableCommand {
             FileHandle.standardError.write(Data("warning: --duration is ignored on Android (global-action dispatch is instantaneous)\n".utf8))
         }
         try AndroidButtonCommand.performPress(udid: device.resolved, keyCode: keyCode)
+        return ExecutionResult()
+    }
+
+    private func executeHarmonyOS() throws -> ExecutionResult {
+        if duration != nil {
+            FileHandle.standardError.write(Data("warning: --duration is ignored on HarmonyOS keyEvent dispatch\n".utf8))
+        }
+        try HarmonyOSButtonCommand.performPress(
+            connectKey: device.resolved,
+            button: buttonType.rawValue
+        )
         return ExecutionResult()
     }
 }

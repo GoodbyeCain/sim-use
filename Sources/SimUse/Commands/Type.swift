@@ -3,6 +3,7 @@ import ArgumentParser
 import Foundation
 import SimUseCore
 import AndroidBackend
+import HarmonyOSBackend
 import iOSSimBackend
 
 /// Top-level cross-platform `type` verb. Owns the flag surface and
@@ -55,20 +56,21 @@ struct Type: SimUseExecutableCommand {
     var inputFile: String?
 
     @OptionGroup var device: DeviceOptions
+    @OptionGroup var targetPlatform: TargetPlatformOptions
 
     @OptionGroup var json: JSONOutputOptions
 
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve(allowPhysical: true)
+        try device.resolve(platform: targetPlatform.platform, allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
 
     // The daemon runs with stdin=/dev/null. Bypass daemon when reading
     // from stdin so --stdin actually sees the caller's terminal input.
-    var daemonBypass: Bool { useStdin }
+    var daemonBypass: Bool { useStdin || device.resolvedPlatform == .harmonyOS }
 
     func format(_ result: ExecutionResult) -> CommandOutput { .empty }
 
@@ -77,7 +79,7 @@ struct Type: SimUseExecutableCommand {
     }
 
     func execute() async throws -> ExecutionResult {
-        switch PlatformRouter.resolve(udid: device.resolved) {
+        switch device.resolvedPlatform {
         case .android:
             return try executeAndroid()
         case .iOSDevice:
@@ -86,7 +88,9 @@ struct Type: SimUseExecutableCommand {
                 reason: "the accessibility audit channel exposes no keyboard or text-input access.",
                 alternative: "Text input on physical iOS devices is not available yet. If the step only needs an activation, use `sim-use tap '#<id>' / --label`."
             )
-        case .iOSSim, .none:
+        case .harmonyOS:
+            return try executeHarmonyOS()
+        case .iOSSim:
             return try await executeIOSSim()
         }
     }
@@ -125,6 +129,18 @@ struct Type: SimUseExecutableCommand {
             throw ValidationError("Invalid input configuration.")
         }
         try AndroidTypeCommand.performType(udid: device.resolved, text: inputText, clear: false)
+        return ExecutionResult()
+    }
+
+    private func executeHarmonyOS() throws -> ExecutionResult {
+        let inputText: String
+        switch (text, useStdin, inputFile) {
+        case (let positional?, false, nil): inputText = positional
+        case (nil, true, nil): inputText = IOSSimTypeCommand.readFromStdin()
+        case (nil, false, let file?): inputText = try IOSSimTypeCommand.readFromFile(file)
+        default: throw ValidationError("Invalid input configuration.")
+        }
+        try HarmonyOSTypeCommand.performType(connectKey: device.resolved, text: inputText)
         return ExecutionResult()
     }
 }

@@ -81,6 +81,26 @@ Detailed solutions for common sim-use issues. The symptom index in SKILL.md poin
 
 **Recipe:** Always `ui` after `button back` to confirm where you ended up. If the result is wrong, use `tap` on a visible "Close" or "Cancel" button instead.
 
+## HarmonyOS: target routes to Android
+
+**Symptom:** A top-level command using an hdc connect-key reports an adb / Android error.
+
+**Why:** adb and hdc identifiers are not disjoint. A USB serial can be an opaque alphanumeric string on either platform, and both transports can use `IP:port`.
+
+**Recipe:** Add `--platform harmonyos --device <connect-key>` to top-level commands, or use `sim-use harmonyos <verb> --device <connect-key>`. When only one hdc target is online, the HarmonyOS namespace can omit `--device`.
+
+## HarmonyOS: hdc works but UI/input does not
+
+**Symptom:** `sim-use harmonyos ping` succeeds, but `ui`, `type`, or an input command fails.
+
+**Why:** hdc transport availability is separate from UITest / uinput availability. The device must have debugging authorized, and focused-field `uitest uiInput text` requires API 18 or newer.
+
+**Recipes:**
+1. Run `sim-use harmonyos devices --all` and confirm the target is `Connected` or `Ready`.
+2. Run `sim-use harmonyos ping --device <connect-key>` to isolate transport failures.
+3. Verify developer options plus USB or wireless debugging authorization on the device.
+4. For an unsupported command (`keyboard-state`, `record-video`, `app-state`, rotate), use a documented supported alternative rather than retrying.
+
 ## Tap lands but nothing happens
 
 **Symptom:** `tap` reports success but the UI doesn't change.

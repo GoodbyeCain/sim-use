@@ -3,6 +3,7 @@ import ArgumentParser
 import Foundation
 import SimUseCore
 import AndroidBackend
+import HarmonyOSBackend
 import iOSSimBackend
 import iOSDeviceBackend
 
@@ -22,6 +23,7 @@ struct DescribeUI: SimUseExecutableCommand {
     )
 
     @OptionGroup var device: DeviceOptions
+    @OptionGroup var targetPlatform: TargetPlatformOptions
 
     @Option(
         name: .customLong("point"),
@@ -85,10 +87,11 @@ struct DescribeUI: SimUseExecutableCommand {
     var includeOffscreen: Bool = false
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve(allowPhysical: true)
+        try device.resolve(platform: targetPlatform.platform, allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
+    var daemonBypass: Bool { device.resolvedPlatform == .harmonyOS }
 
     func validate() throws {
         try IOSSimDescribeUICommand.validatePoint(point)
@@ -101,12 +104,14 @@ struct DescribeUI: SimUseExecutableCommand {
     }
 
     func execute() async throws -> ExecutionResult {
-        switch PlatformRouter.resolve(udid: device.resolved) {
+        switch device.resolvedPlatform {
         case .android:
             return try executeAndroid()
         case .iOSDevice:
             return try await executeIOSDevice()
-        case .iOSSim, .none:
+        case .harmonyOS:
+            return try executeHarmonyOS()
+        case .iOSSim:
             return try await executeIOSSim()
         }
     }
@@ -189,6 +194,28 @@ struct DescribeUI: SimUseExecutableCommand {
             udid: device.resolved,
             includeOffscreen: includeOffscreen,
             includeRaw: jsonOutput && !noRaw
+        )
+        return ExecutionResult(
+            platform: result.platform.rawValue,
+            raw: result.raw,
+            outline: result.outline,
+            entries: result.entries,
+            lists: result.lists,
+            screen: result.screen,
+            appLabel: result.appLabel,
+            appPackage: result.appPackage,
+            crashDialog: result.crashDialog
+        )
+    }
+
+    private func executeHarmonyOS() throws -> ExecutionResult {
+        if point != nil {
+            throw CLIError(errorDescription: "HarmonyOS describe-ui does not support --point; dump the tree and select an @N alias instead.")
+        }
+        let result = try HarmonyOSDescribeUICommand.performDescribeUI(
+            connectKey: device.resolved,
+            includeOffscreen: includeOffscreen,
+            includeRaw: jsonOutput
         )
         return ExecutionResult(
             platform: result.platform.rawValue,

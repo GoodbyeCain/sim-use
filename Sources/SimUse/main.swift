@@ -6,6 +6,7 @@ import FBControlCore
 import Darwin
 import SimUseCore
 import AndroidBackend
+import HarmonyOSBackend
 import iOSSimBackend
 import iOSDeviceBackend
 
@@ -54,7 +55,7 @@ enum EntryPoint {
                 Hint: as of 0.5.x, the iOS-only verbs (key, key-combo, \
                 key-sequence, batch) live exclusively under \
                 `sim-use ios <verb>` — the top-level surface only carries \
-                verbs that work on both iOS and Android. Re-run with the \
+                cross-platform verbs. Re-run with the \
                 `ios` namespace and your existing flags should keep working:
 
                     \(canonical) \(CommandLine.arguments.dropFirst(2).joined(separator: " "))
@@ -71,10 +72,11 @@ struct SimUse: AsyncParsableCommand {
     static let simUseLogger = SimUseLogger()
 
     static let configuration = CommandConfiguration(
-        abstract: "A utility to interact with iOS Simulators and Android emulators/devices and extract accessibility information.",
+        abstract: "A utility to interact with iOS Simulators, Android, and HarmonyOS emulators/devices and extract accessibility information.",
         version: VERSION,
         subcommands: [
-            // Cross-platform verbs (top-level routes by UDID shape).
+            // Cross-platform verbs (top-level routes by identifier shape
+            // or the explicit --platform override).
             DescribeUI.self,
             Devices.self,
             ListSimulators.self,
@@ -97,13 +99,13 @@ struct SimUse: AsyncParsableCommand {
             // Daemon + spike helpers.
             Daemon.self,
             SpikeDaemon.self,
-            // Platform-specific namespaces. The four iOS-only HID verbs
+            // Platform-specific namespaces. The iOS-only HID verbs
             // (key, key-combo, key-sequence, batch) live under
-            // `IOSSimCommand` only — the top-level surface only carries
-            // verbs that work on both platforms.
+            // `IOSSimCommand`; HarmonyOS commands are grouped separately.
             IOSSimCommand.self,
             IOSDeviceCommand.self,
             AndroidCommand.self,
+            HarmonyOSCommand.self,
         ]
     )
 }

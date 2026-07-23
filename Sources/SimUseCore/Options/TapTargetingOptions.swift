@@ -25,19 +25,19 @@ public struct TapTargetingOptions: ParsableArguments {
     ))
     public var point: CoordinatePair?
 
-    @Option(name: [.customLong("id")], help: "Target the center of the element matching AXUniqueId/resource-id literally. For the N-th outline entry, use the positional `@N` alias instead — `--id 42` matches the identifier string '42', NOT outline alias @42. Ignored if explicit coordinates (-x/-y or --point) are provided.")
+    @Option(name: [.customLong("id")], help: "Target the center of the element matching a platform accessibility identifier/resource-id literally. For the N-th outline entry, use the positional `@N` alias instead — `--id 42` matches the identifier string '42', NOT outline alias @42. Ignored if explicit coordinates (-x/-y or --point) are provided.")
     public var elementID: String?
 
-    @Option(name: [.customLong("label")], help: "Target the center of the element matching AXLabel (accessibilityLabel). Ignored if explicit coordinates (-x/-y or --point) are provided.")
+    @Option(name: [.customLong("label")], help: "Target the center of the element matching its accessibility label. Ignored if explicit coordinates (-x/-y or --point) are provided.")
     public var elementLabel: String?
 
-    @Option(name: [.customLong("value")], help: "Target the center of the element matching AXValue (the current value of a control). Ignored if explicit coordinates (-x/-y or --point) are provided.")
+    @Option(name: [.customLong("value")], help: "Target the center of the element matching the current accessibility value. Ignored if explicit coordinates (-x/-y or --point) are provided.")
     public var elementValue: String?
 
-    @Option(name: [.customLong("label-contains")], help: "Target the element whose AXLabel contains this case-sensitive substring. Useful when labels carry dynamic state (counters, timestamps). Mutually exclusive with --id/--label/--value/--label-regex.")
+    @Option(name: [.customLong("label-contains")], help: "Target the element whose accessibility label contains this case-sensitive substring. Useful when labels carry dynamic state (counters, timestamps). Mutually exclusive with --id/--label/--value/--label-regex.")
     public var labelContains: String?
 
-    @Option(name: [.customLong("label-regex")], help: "Target the element whose AXLabel matches this ICU regex. Anchor with ^/$ for exact match. Mutually exclusive with --id/--label/--value/--label-contains.")
+    @Option(name: [.customLong("label-regex")], help: "Target the element whose accessibility label matches this ICU regex. Anchor with ^/$ for exact match. Mutually exclusive with --id/--label/--value/--label-contains.")
     public var labelRegex: String?
 
     @Option(name: [.customLong("element-type")], help: "Filter matches to elements of this accessibility type (e.g. Button, TextField, Switch). Narrows --id/--label/--value/--label-contains/--label-regex results when multiple elements match.")
@@ -47,7 +47,7 @@ public struct TapTargetingOptions: ParsableArguments {
         name: .customLong("frame"),
         parsing: .singleValue,
         help: ArgumentHelp(
-            "Geometric AND-filter on frame bounds. Repeatable. Each value is a comma-separated list of `key=value` pairs. Keys: minX, maxX, minY, maxY. Values are absolute pixels (e.g. 700) or 0..1 fractions of the screen with an `r` suffix (e.g. 0.6r). Combine with selectors to disambiguate when several elements share a label/pattern but live in different screen regions.",
+            "Geometric AND-filter on frame bounds. Repeatable. Each value is a comma-separated list of `key=value` pairs. Keys: minX, maxX, minY, maxY. Values are absolute platform-native units (e.g. 700) or 0..1 fractions of the screen with an `r` suffix (e.g. 0.6r). Combine with selectors to disambiguate when several elements share a label/pattern but live in different screen regions.",
             valueName: "key=value[,key=value]"
         )
     )
@@ -122,12 +122,12 @@ public struct TapTargetingOptions: ParsableArguments {
             }
 
             if pointX != nil || pointY != nil || point != nil {
-                throw ValidationError("--frame cannot be combined with explicit -x/-y/--point coordinates (those bypass the AX tree).")
+                throw ValidationError("--frame cannot be combined with explicit -x/-y/--point coordinates (those bypass the accessibility tree).")
             }
             if let alias, case .some(let parsed) = OutlineAliasResolver.parse(alias) {
                 switch parsed {
                 case .at, .list:
-                    throw ValidationError("--frame cannot be combined with the @N / #N / #N@M alias forms (they resolve to cached coordinates without consulting the AX tree). Use --label / --label-contains / --label-regex / --id / #<id> with --frame instead.")
+                    throw ValidationError("--frame cannot be combined with the @N / #N / #N@M alias forms (they resolve to cached coordinates without consulting the accessibility tree). Use --label / --label-contains / --label-regex / --id / #<id> with --frame instead.")
                 case .id:
                     break
                 }

@@ -64,11 +64,11 @@ After any non-trivial change, at minimum:
 
 1. `make build` succeeds.
 2. `make test` passes.
-3. Spot-check the affected command on a live simulator (`describe-ui`, `tap @N`, `screenshot`).
+3. Spot-check the affected command on a live target (`describe-ui`, `tap @N`, `screenshot`).
 
 ## Module layout
 
-Five SwiftPM targets; dependency graph flows in one direction.
+Six SwiftPM targets; dependency graph flows in one direction.
 
 | Target | Path | Depends on |
 |---|---|---|
@@ -79,26 +79,29 @@ Five SwiftPM targets; dependency graph flows in one direction.
 | `SimUse` (executable) | `Sources/SimUse/` | SimUseCore + SimUseVideo + iOSSimBackend + AndroidBackend + FB* |
 
 `SimUseVideo` holds the platform-neutral host-side video plumbing (H.264 Annex B parsing, passthrough muxing, `AVAssetWriter` encoding, frame utilities) shared by the iOS and Android recording/streaming paths. It must stay FB*-free — anything that needs FBSimulatorControl belongs in `iOSSimBackend` (e.g. the `VideoFrameUtilities.captureScreenshotData` extension), anything adb-shaped in `AndroidBackend`.
+| `HarmonyOSBackend` | `Sources/HarmonyOSBackend/` | SimUseCore + ArgumentParser |
+| `SimUse` (executable) | `Sources/SimUse/` | SimUseCore + SimUseVideo + iOSSimBackend + AndroidBackend + HarmonyOSBackend + FB* |
 
 ### Verb dispatch
 
-A verb (tap, swipe, type, ...) reaches three surfaces:
+A verb (tap, swipe, type, ...) reaches up to four surfaces:
 
-1. **Top-level** — `Sources/SimUse/Commands/<Verb>.swift`. Resolves the target via `PlatformRouter`, then forwards to the iOS or Android backend.
+1. **Top-level** — `Sources/SimUse/Commands/<Verb>.swift`. Resolves the target via `PlatformRouter`, then forwards to the selected backend. HarmonyOS requires `--platform harmonyos` because hdc and adb identifiers can collide.
 2. **`sim-use ios <verb>`** — `Sources/iOSSimBackend/Verbs/IOSSim<Verb>Command.swift`.
 3. **`sim-use android <verb>`** — `Sources/AndroidBackend/Verbs/Android<Verb>Command.swift`.
+4. **`sim-use harmonyos <verb>`** — `Sources/HarmonyOSBackend/Verbs/HarmonyOS<Verb>Command.swift` (some initial verbs currently share `HarmonyOSCommand.swift`).
 
 Four verbs are iOS-only (`key`, `key-combo`, `key-sequence`, `batch`) — no top-level alias.
 
 ### Adding a new verb
 
-- **Cross-platform**: write `IOSSim<Verb>Command` + `Android<Verb>Command`, plus a top-level forwarder in `Sources/SimUse/Commands/<Verb>.swift`. Register in `IOSSimCommand.swift`, `AndroidCommand.swift`, and `main.swift`.
+- **Cross-platform**: write the applicable `IOSSim<Verb>Command`, `Android<Verb>Command`, and `HarmonyOS<Verb>Command`, plus a top-level forwarder in `Sources/SimUse/Commands/<Verb>.swift`. Register in each supported platform root and `main.swift`.
 - **iOS-only**: write `IOSSim<Verb>Command`, register in `IOSSimCommand` only. Use `HIDKeyCommandHelp.androidUnsupportedMessage` to reject Android UDIDs (see `IOSSimKeyCommand`).
 - **Shared flags**: `@OptionGroup var udid: UDIDOptions` + `@OptionGroup var json: JSONOutputOptions`.
 
 ### Daemon
 
-`SimUseExecutableCommand.run()` forwards UDID-scoped verbs to a per-UDID auto-spawned daemon (`Sources/SimUseCore/Daemon/`). Platform-agnostic — both iOS and Android verbs route through it. Key regression test: `Tests/DaemonCommandParserInjectionTests.swift`.
+`SimUseExecutableCommand.run()` forwards iOS / Android device-scoped verbs to a per-device auto-spawned daemon (`Sources/SimUseCore/Daemon/`). HarmonyOS verbs currently set `daemonBypass = true`: daemon paths and liveness state are keyed by an unqualified device ID, so an adb and hdc target with the same serial must not share a daemon. Key regression test: `Tests/DaemonCommandParserInjectionTests.swift`.
 
 ## Android development
 
@@ -123,3 +126,33 @@ The `bridge/` directory contains a Kotlin Android app (AccessibilityService + HT
 ### Bundling the APK
 
 The APK is gitignored (`Sources/AndroidBackend/Resources/*.apk`). Run `scripts/build-bridge.sh` before `make build` so the binary includes Android support.
+
+## HarmonyOS development
+
+`HarmonyOSBackend` uses SDK-provided `hdc`, UITest, and uinput commands. It does not install a device-side bridge. The same hdc target interface covers DevEco emulators, USB devices, and TCP devices.
+
+### Required tooling
+
+- DevEco Studio or the HarmonyOS/OpenHarmony command-line SDK.
+- `hdc` discoverable on `PATH`, through a standard SDK location, or via `SIM_USE_HDC=/absolute/path/to/hdc`.
+- Developer options plus USB or wireless debugging enabled and authorized on the target.
+- API 18+ for focused-field `uitest uiInput text`.
+
+### Routing and caches
+
+- Top-level verbs use `--platform harmonyos --device <connect-key>`.
+- `sim-use harmonyos <verb>` auto-selects only when one hdc target is online.
+- HarmonyOS outline caches use `harmonyos:<connect-key>` as the logical key.
+- Keep HarmonyOS commands off the daemon until daemon identity is namespaced by platform.
+
+### Verification
+
+Run `swift test --filter HarmonyOSBackendTests` for parser, dumpLayout, renderer, selector, and fake-hdc command tests. With a target connected, spot-check read-only operations first:
+
+```bash
+sim-use harmonyos ping --device <connect-key>
+sim-use ui --platform harmonyos --device <connect-key> --json
+sim-use harmonyos screenshot --device <connect-key> --output /tmp/harmonyos-smoke.png
+```
+
+Interaction verbs should be exercised against a disposable fixture app, not a personal device screen.

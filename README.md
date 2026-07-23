@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Tests](https://github.com/lycorp-jp/sim-use/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/lycorp-jp/sim-use/actions/workflows/tests.yml)
 
-Give AI agents the ability to observe and act on iOS Simulator and Android emulator / device screens.
+Give AI agents the ability to observe and act on iOS Simulator, Android, and HarmonyOS emulator / device screens.
 
 **Observe** — turn any screen into a token-efficient outline an LLM can reason about:
 
@@ -33,7 +33,7 @@ $ sim-use tap @9
 
 Plan, code, **verify**, ship — teach this CLI to your agent and close the last gap in the agentic mobile development loop. Let agents verify what they built so you can focus on what matters.
 
-`sim-use` is a cross-platform CLI that drives Apple's Accessibility APIs, the iOS Simulator HID pipeline, and Android's AccessibilityService through a single command surface. It emits a compact, agent-friendly screen description (`ui`) and an alias-cached tap shortcut (`tap @N`) so an LLM loop can observe → act in a few hundred milliseconds per round trip.
+`sim-use` is a cross-platform CLI that drives Apple's Accessibility APIs and Simulator HID pipeline, Android's AccessibilityService, and HarmonyOS UITest / uinput through a single command surface. It emits a compact, agent-friendly screen description (`ui`) and an alias-cached tap shortcut (`tap @N`) so an LLM loop can observe → act with the same workflow on every backend.
 
 
 - [The observe → act loop](#the-observe--act-loop)
@@ -77,8 +77,8 @@ interpreted in the device-native portrait space.
 - **Token-efficient.** The outline representation is ~16x more compact than a raw JSON accessibility tree. An LLM can read and reason about an entire screen in a few hundred tokens.
 - **Nothing hidden.** sim-use walks the full accessibility tree including WebViews, system overlays, and embedded content — no elements are silently skipped. When the frontmost app exposes an empty tree because a remote process owns the visible UI (a system document picker, for example), `ui` automatically retries with cross-process discovery and flags the recovered, flat hierarchy via the `advisory` envelope key.
 - **AI-native.** Designed from day one for agent loops, not human testers. Alias-cached taps (`@N`), structured `--json` envelopes with actionable `hint` fields on errors, and a bundled agent skill (`sim-use init --client claude`) that teaches your AI client the full command surface.
-- **Fast.** A per-device background daemon amortises init cost across calls. After the first command, each observe-act round trip completes in ~300 ms.
-- **Cross-platform.** One command surface drives both iOS Simulator and Android emulator/device. Same verbs, same flags, same `--json` shape — write one agent loop that works on both.
+- **Fast.** A per-device background daemon amortises iOS / Android setup cost across calls; HarmonyOS uses direct hdc invocations with no resident device-side service.
+- **Cross-platform.** One command surface drives iOS Simulator plus Android and HarmonyOS emulators/devices. Shared verbs use the same flags and `--json` shape, so one agent loop can cover all three platforms.
 
 
 ## Install
@@ -139,11 +139,30 @@ sim-use init --uninstall --client claude
 
 ## Platforms
 
-sim-use drives both **iOS Simulators** and **Android devices / emulators** through the same command surface. The device ID shape decides which backend handles the call:
+sim-use drives **iOS Simulators**, **Android devices / emulators**, and **HarmonyOS devices / DevEco emulators** through the same top-level command surface:
 
   * `1A2B3C4D-...` (UUID) → iOS Simulator
   * `emulator-5554` / `R5CT1ABCD12` / `192.168.1.5:5555` → Android device
   * `00008130-...` (8-16 hex) / 40-hex → physical iPhone/iPad (restricted verb set)
+  * `emulator-5554` / Android serial → Android
+  * HarmonyOS hdc connect-key → HarmonyOS, selected explicitly with `--platform harmonyos`
+
+Android and HarmonyOS identifiers are not disjoint: both may be opaque serials or `IP:port`. Top-level HarmonyOS calls therefore require an explicit platform override:
+
+```bash
+sim-use ui --platform harmonyos --device <connect-key>
+sim-use tap @5 --platform harmonyos --device <connect-key>
+```
+
+The HarmonyOS namespace avoids repeating the platform and auto-selects the target when exactly one online hdc target exists:
+
+```bash
+sim-use harmonyos devices
+sim-use harmonyos ui
+sim-use harmonyos tap @5
+```
+
+HarmonyOS support uses the SDK-provided `hdc`, `uitest`, and `uinput` tools directly; no device-side bridge app is installed. `hdc` provides the same transport for USB physical devices, TCP devices, and DevEco emulators. Install DevEco Studio or the command-line HarmonyOS/OpenHarmony SDK, put `hdc` on `PATH`, or set `SIM_USE_HDC` to its absolute path. Text injection through `uitest uiInput text` requires API 18 or newer.
 
 For Android, run `sim-use android init --device <serial>` once to install the bridge APK. See `AGENTS.md` for Android toolchain setup.
 
@@ -152,12 +171,15 @@ For Android, run `sim-use android init --device <serial>` once to install the br
 
 ## Commands
 
-All device-scoped commands accept `--device <ID>` (optional when only one simulator is booted). Three command layers:
+All device-scoped commands accept `--device <ID>` (optional under each platform's documented auto-resolution rule). Four command layers:
 
   * **Top-level** — cross-platform verbs: `ui`, `tap`, `long-press`, `swipe`, `touch`, `multi-touch`, `type`, `paste`, `button`, `gesture`, `keyboard-state`, `screenshot`, `record-video`, `stream-video`, `app-state`. Same flags on iOS and Android; physical iOS devices route through `ui`, `tap` and `screenshot` only (the rest reject with the reason — see the [capability matrix](#physical-ios-devices)).
   * **`sim-use ios <verb>`** — iOS-Simulator-only: `key`, `key-combo`, `key-sequence`, `batch`.
   * **`sim-use android <verb>`** — Android-only: `init`, `devices`, `ping`, `scroll`.
   * **`sim-use ios-device <verb>`** — physical-iOS-only: `devices`, `ui`, `screenshot`, `tap` (experimental). Peer of `ios`/`android`; also accepts ECIDs and the hierarchy tuning flags the top level doesn't carry.
+  * **`sim-use harmonyos <verb>`** — HarmonyOS-only: `devices`, `ping`, `describe-ui`, `tap`, `swipe`, `type`, `button`, `touch`, `multi-touch`, `screenshot`.
+
+HarmonyOS does not yet implement `keyboard-state`, `record-video`, or `app-state`; rotate gesture presets are also unavailable because `uinput` exposes linear multi-finger paths rather than continuous curved paths. These combinations fail with an explicit unsupported diagnostic.
 
 Run `sim-use --help` or `sim-use <command> --help` for the full flag set.
 
@@ -208,7 +230,7 @@ sim-use type --file input.txt --device $UDID
 
 ### Paste (IME-safe Unicode)
 
-`sim-use paste` writes text to the simulator pasteboard (`simctl pbcopy`) and issues Cmd+V, so characters reach the focused field without going through the keyboard. This bypasses host IME composition (e.g. Japanese kana remapping ASCII keys) and accepts arbitrary Unicode the HID keycode table cannot express (CJK, emoji, diacritics).
+On iOS, `sim-use paste` writes text to the simulator pasteboard (`simctl pbcopy`) and issues Cmd+V, so characters reach the focused field without going through the keyboard. Android uses its bridge paste action. HarmonyOS injects text at the focused field through UITest; `--replace` and `--via-menu` are not supported there.
 
 ```bash
 sim-use paste 'ABC 日本語 🎉' --device $UDID             # at caret
@@ -230,6 +252,8 @@ iOS 16+ gates the first paste per app session behind an "Allow Paste" prompt (mo
 ### Keyboard state
 
 Probe whether the software keyboard is visible. Primary use: pick between the `paste` Cmd+V default and `--via-menu` path.
+
+Available on iOS and Android. HarmonyOS currently returns an explicit unsupported error because stable hdc / UITest CLI releases do not expose keyboard visibility.
 
 ```bash
 # Prints `soft` or `hidden` (both exit 0; non-zero = probe failure). Branch on stdout:
@@ -366,7 +390,7 @@ The `--json` envelope carries the raw accessibility tree under `data.raw` by def
 
 The outline uses region banding (`[Top]` / `[Content]` / `[Bottom]` / declared `Group` regions) and `@N` / `#N` / `#N@M` / `#<id>` alias addressing. When the device is rotated, the `App:` header carries an orientation tag (e.g. `(landscape-right)`) and the `--json` envelope an `orientation` field.
 
-A list cluster detector runs on every snapshot and attaches `#N` aliases to detected list cells — outline lines render as `@N #M` (dominant list) or `@N #M@S` (scope `S>1`). The `--json` envelope adds a `lists` array (one summary per cluster, ordered by detector score, dominant first) and per-cell membership under `entries[*].aliases.list`.
+On iOS / Android, a list cluster detector attaches `#N` aliases to detected list cells. Outline lines for cells render as `@N #M` (dominant list) or `@N #M@S` (scope `S>1`); the `--json` envelope adds a sibling `lists` array, ordered by detector score, where each entry summarises one cluster as `{ scope, cellCount, cellHeight, containerRole, containerLabel, bbox, score }`. Per-cell membership is also surfaced through `entries[*].aliases.list = { scope, index }` so consumers can pivot on either shape. `lists[0]` is always the dominant cluster, or the array is empty when nothing list-shaped is on screen. HarmonyOS currently exposes `@N` and `#<id>` aliases but does not infer list-cell aliases.
 
 ### App state & crash detection
 
@@ -376,11 +400,11 @@ sim-use app-state --bundle-id com.example.app --device $UDID  # running | not_ru
 sim-use app-state --reset --device $UDID                      # re-baseline crash detection
 ```
 
-While the daemon drives a device, it watches for the target process disappearing between commands and surfaces a banner on the next `ui` call. The signal is process liveness (not foreground identity), so backgrounding for a permission dialog or share sheet never false-fires. On Android, `ui` also detects the AOSP system crash dialog directly from the accessibility tree. Call `app-state --reset` after an intentional relaunch; `SIM_USE_NO_CRASH_DETECT=1` disables detection entirely.
+While the daemon drives an iOS or Android target, it watches for the target process disappearing between commands and surfaces a banner on the next `ui` call. The signal is process liveness (not foreground identity), so backgrounding for a permission dialog or share sheet never false-fires. On Android, `ui` also detects the AOSP system crash dialog directly from the accessibility tree. Call `app-state --reset` after an intentional relaunch; `SIM_USE_NO_CRASH_DETECT=1` disables detection entirely. HarmonyOS commands currently bypass the daemon, and `app-state` is unavailable there.
 
 ### Daemon
 
-UDID-scoped commands auto-spawn a per-UDID background daemon on first use and reuse it on subsequent calls, amortising FBSimulatorControl / accessibility init (~200 ms per `ui`-shaped call). Scripts do not need to manage the daemon.
+iOS / Android device-scoped commands auto-spawn a per-device background daemon on first use and reuse it on subsequent calls, amortising FBSimulatorControl / accessibility init (~200 ms per `ui`-shaped call). Scripts do not need to manage the daemon. HarmonyOS commands intentionally bypass it because adb and hdc connect-keys can collide; direct hdc execution keeps their cache and process state isolated.
 
 ```bash
 sim-use daemon status
@@ -391,7 +415,7 @@ sim-use daemon stop --all
 SIM_USE_NO_DAEMON=1 sim-use ui --device $UDID
 ```
 
-Daemons self-exit after 600 s of idle and log to `/tmp/sim-use-<uid>/<UDID>.log`. Streaming commands (`screenshot`, `record-video`, `stream-video`) always run in-process regardless.
+Daemons self-exit after 600 s of idle and log to `/tmp/sim-use-<uid>/<UDID>.log`. Streaming commands (`screenshot`, `record-video`, `stream-video`) and all HarmonyOS commands run in-process.
 
 
 ## Physical iOS devices
@@ -477,7 +501,12 @@ This channel deliberately differs from the simulator backend:
 
 ## Architecture
 
-sim-use drives iOS Simulators through the lower-level XCFrameworks of Facebook's [idb](https://github.com/facebook/idb) (statically linked), Apple's Accessibility APIs, and the simulator HID pipeline. Android devices are driven through an on-device bridge APK that exposes the AccessibilityService tree and input injection over HTTP, tunnelled via `adb forward`. Physical iOS devices go through a third path: idb's `FBDeviceControl` opens a lockdown service connection, over which sim-use speaks Apple's DTX message protocol to the accessibility audit daemon (screen capture instead shells out to Xcode's `devicectl`). Everything ships as a single binary, and every surface — simulator, Android and physical iOS — supports `--json` with the shared `{ok, data}` envelope.
+sim-use drives iOS Simulators through the lower-level XCFrameworks of Facebook's [idb](https://github.com/facebook/idb) (statically linked), Apple's Accessibility APIs, and the simulator HID pipeline. Android devices use an on-device bridge APK exposing AccessibilityService over `adb forward`. Physical iOS devices use idb's `FBDeviceControl` and Apple's DTX accessibility-audit protocol, while screenshots use Xcode's `devicectl`. HarmonyOS targets use `hdc` directly: UITest supplies UI dumps, screenshots, text, and key events, while `uinput` supplies touch and multi-touch injection. The hdc backend is transport-agnostic across DevEco emulators, USB devices, and TCP devices. Everything ships as a single binary with shared `{ok, data}` JSON envelopes.
+
+- **Single binary, single invocation.** No RPC daemon to manage manually; the optional per-UDID background daemon is auto-spawned and opt-out (`SIM_USE_NO_DAEMON=1`).
+- **Agent-first output.** `ui` emits a compact outline with stable `@N` / `#<id>` aliases designed to round-trip between an LLM and the simulator with minimal token cost.
+- **Full HID surface.** Tap, swipe, touch, gesture presets, hardware buttons, key combos, and IME-safe Unicode paste all exposed as first-class commands.
+- **Scriptable from day one.** Every command supports `--json` for machine consumption; `batch` collapses multi-step flows into a single invocation.
 
 
 ## Viewer

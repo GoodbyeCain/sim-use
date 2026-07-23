@@ -7,7 +7,7 @@ Verifies that sim-use is installed, the target device is reachable,
 and the daemon is healthy. Run before first interaction with a device.
 
 Usage:
-    python3 preflight.py --device <UDID>
+    python3 preflight.py --device <ID> [--platform ios|android|harmonyos]
     python3 preflight.py                    # auto-resolve single device
 """
 
@@ -38,13 +38,15 @@ class Check:
 class Ctx:
     device: Optional[str] = None
     sim_use_bin: str = "sim-use"
-    platform: Optional[str] = None  # "ios" or "android", detected
+    platform: Optional[str] = None  # "ios", "android", or "harmonyos"
     errors: list = field(default_factory=list)
 
     def run_sim_use(self, *args: str, check: bool = False) -> subprocess.CompletedProcess:
         cmd = [self.sim_use_bin] + list(args)
         if self.device:
             cmd.extend(["--device", self.device])
+        if self.platform:
+            cmd.extend(["--platform", self.platform])
         return subprocess.run(cmd, capture_output=True, text=True, check=check)
 
     def run_sim_use_json(self, *args: str) -> Optional[dict]:
@@ -93,8 +95,11 @@ def check_sim_use_installed(ctx: Ctx) -> bool:
 
 
 def check_device_listed(ctx: Ctx) -> bool:
+    command = [ctx.sim_use_bin, "devices", "--json"]
+    if ctx.platform:
+        command.extend(["--platform", ctx.platform])
     result = subprocess.run(
-        [ctx.sim_use_bin, "devices", "--json"],
+        command,
         capture_output=True, text=True,
     )
     if result.returncode != 0:
@@ -106,7 +111,10 @@ def check_device_listed(ctx: Ctx) -> bool:
         return False
 
     if not ctx.device:
-        booted = [d for d in devices if d.get("state", "").lower() in ("booted", "device")]
+        booted = [
+            d for d in devices
+            if d.get("state", "").lower() in ("booted", "device", "connected", "ready")
+        ]
         if len(booted) == 1:
             ctx.device = booted[0].get("deviceId") or booted[0].get("udid")
             ctx.platform = booted[0].get("platform")
@@ -117,13 +125,20 @@ def check_device_listed(ctx: Ctx) -> bool:
             print("        Re-run with --device <UDID> to pick one.")
         return False
 
+    matches = []
     for d in devices:
         # `deviceId` is the canonical key; `udid` covers older sim-use
         # binaries that predate the rename.
         did = d.get("deviceId") or d.get("udid", "")
         if did == ctx.device:
-            ctx.platform = d.get("platform")
-            return True
+            matches.append(d)
+    if len(matches) == 1:
+        ctx.platform = matches[0].get("platform")
+        return True
+    if len(matches) > 1:
+        platforms = sorted({d.get("platform", "unknown") for d in matches})
+        print(f"        Device ID exists on multiple platforms: {', '.join(platforms)}")
+        print("        Re-run with --platform ios|android|harmonyos.")
     return False
 
 
@@ -146,6 +161,8 @@ def check_ui_responds(ctx: Ctx) -> bool:
 
 
 def autofix_daemon_restart(ctx: Ctx) -> bool:
+    if ctx.platform == "harmonyos":
+        return False
     # `daemon stop --all` is mutually exclusive with `--device`, so bypass
     # run_sim_use (which appends --device when a device is set and would make
     # the command fail with "Specify either --device <id> or --all").
@@ -170,7 +187,7 @@ def shared_checks() -> list[Check]:
             description="target device is listed and reachable",
             run=check_device_listed,
             on_fail="abort",
-            fix_hint="Boot a simulator or connect an Android device, then retry.",
+            fix_hint="Boot a simulator or connect an Android/HarmonyOS device, then retry. For HarmonyOS, verify hdc and USB/TCP debugging authorization.",
         ),
         Check(
             id="ui_responds",
@@ -178,7 +195,7 @@ def shared_checks() -> list[Check]:
             run=check_ui_responds,
             on_fail="auto",
             autofix=autofix_daemon_restart,
-            fix_hint="Try: sim-use daemon stop --all, then retry.",
+            fix_hint="For iOS/Android try: sim-use daemon stop --all. For HarmonyOS, run sim-use harmonyos ping --device <connect-key> and verify hdc/UITest availability.",
         ),
     ]
 
@@ -189,11 +206,12 @@ def shared_checks() -> list[Check]:
 
 def main():
     parser = argparse.ArgumentParser(description="sim-use preflight check")
-    parser.add_argument("--device", help="Device UDID or serial (auto-detected if omitted)")
+    parser.add_argument("--device", help="Device UDID, adb serial, or hdc connect-key (auto-detected if omitted)")
+    parser.add_argument("--platform", choices=("ios", "android", "harmonyos"), help="Disambiguate the target backend")
     parser.add_argument("--sim-use-bin", default="sim-use", help="Path to sim-use binary")
     args = parser.parse_args()
 
-    ctx = Ctx(device=args.device, sim_use_bin=args.sim_use_bin)
+    ctx = Ctx(device=args.device, sim_use_bin=args.sim_use_bin, platform=args.platform)
 
     print("sim-use preflight\n")
     passed = run_checks(shared_checks(), ctx)

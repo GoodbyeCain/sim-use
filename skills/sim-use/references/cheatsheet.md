@@ -4,15 +4,16 @@
 
 | Namespace | Scope | Examples |
 |---|---|---|
-| `sim-use <verb>` | Cross-platform (iOS + Android) | `ui`, `tap`, `swipe`, `type`, `paste`, `button`, `gesture`, `screenshot`, `record-video`, `stream-video`, `app-state` |
+| `sim-use <verb>` | Cross-platform (iOS + Android + HarmonyOS) | `ui`, `tap`, `swipe`, `type`, `paste`, `button`, `gesture`, `screenshot`, `record-video`, `stream-video`, `app-state` (support varies by platform) |
 | `sim-use ios <verb>` | iOS Simulator only | `key`, `key-combo`, `key-sequence`, `batch` |
 | `sim-use android <verb>` | Android device only | `init`, `devices`, `ping` |
+| `sim-use harmonyos <verb>` | HarmonyOS emulator/device only | `devices`, `ping`, `ui`, `tap`, `swipe`, `type`, `button`, `touch`, `multi-touch`, `screenshot` |
 
 ## Device resolution
 
-`--device` is optional. Resolution order: `--device` flag → `$SIM_USE_DEVICE` env → only live daemon → only booted simulator.
+For iOS, `--device` is optional. Resolution order: `--device` flag → `$SIM_USE_DEVICE` env → only live daemon → only booted simulator.
 
-When multiple devices exist, pass `--device <UDID>` explicitly. Run `sim-use devices` to list all connected devices across platforms.
+Android and HarmonyOS IDs may have the same shape. For a top-level HarmonyOS command, pass `--platform harmonyos --device <connect-key>` (or set `$SIM_USE_DEVICE` with the platform flag). The `sim-use harmonyos` namespace auto-selects when exactly one online hdc target exists. Run `sim-use devices` to list all connected targets.
 
 ## Selectors
 
@@ -55,6 +56,7 @@ sim-use paste 'text' --via-menu --target-id <id>  # iOS edit menu (soft keyboard
 
 - iOS: `paste` needs hardware keyboard connected; use `--via-menu` for soft-keyboard-only.
 - Android: `paste` uses native `ACTION_PASTE`; `type` works for all unicode.
+- HarmonyOS: `type` / `paste` use focused-field UITest text injection (API 18+); `paste --replace` and `--via-menu` are unsupported.
 
 ## Gestures and timing
 
@@ -94,6 +96,8 @@ sim-use gesture pinch-out --center-x 200 --center-y 400  # off-center pivot
 | `--radius` | 80 | Start radius (pixels) |
 | `--steps` | 10 | Interpolated HID Move events (iOS only) |
 | `--step-ms` | derived from duration/steps | Sleep between Move events (iOS only) |
+
+HarmonyOS supports the swipe and pinch presets through linear uinput paths. Rotate presets are unsupported because hdc uinput does not expose a continuous curved two-finger trajectory.
 
 ## Multi-touch (low-level)
 
@@ -166,7 +170,7 @@ sim-use daemon stop --all
 SIM_USE_NO_DAEMON=1 sim-use ui     # bypass daemon for one call
 ```
 
-Daemon is iOS-only (auto-spawned, 600s idle TTL). Android commands go through adb directly.
+The daemon is used by iOS / Android device-scoped commands (auto-spawned, 600s idle TTL). HarmonyOS commands bypass it and invoke hdc directly so adb and hdc targets with the same ID cannot share daemon/cache state.
 
 ## iOS keyboard (HID keycodes)
 
@@ -198,9 +202,9 @@ sim-use ios key-combo --modifiers 227,225 --key 4     # Cmd+Shift+A
 | `--duration` | 0–10s | Action duration | swipe, gesture, button, key, tap (opt-in for toggles) |
 | `--delay` | 0–5s | Between-item delay | key-sequence, touch |
 
-## UDID auto-resolution
+## Device auto-resolution
 
-`--device` is optional. Resolution order:
+For the legacy top-level iOS/default path, `--device` is optional. Resolution order:
 
 1. Explicit `--device <UDID>` flag
 2. `$SIM_USE_DEVICE` environment variable
@@ -211,6 +215,7 @@ Edge cases:
 - **Stale daemon**: if you shut down a simulator outside sim-use but its daemon is still alive, the next command fails loudly — run `sim-use daemon stop --all` then retry.
 - **Multiple daemons + multiple booted**: falls through to step 4 and errors with a disambiguation message listing all booted devices.
 - For CI fan-out (many simulators in parallel), keep `--device` explicit.
+- For HarmonyOS, prefer `sim-use harmonyos <verb>` for single-target auto-resolution. Top-level calls require `--platform harmonyos`; pass `--device` or `$SIM_USE_DEVICE` to identify the hdc target.
 
 ## --json envelope
 
@@ -218,4 +223,4 @@ Every command supports `--json`. Shape: `{ "ok": true/false, "data": {...}, "err
 
 The `hint` field on errors contains actionable guidance (e.g. candidate labels on `multipleMatches`). Use it for self-correcting retries.
 
-For `ui --json`, prefer `data.outline` / `data.entries` / `data.lists`. The `data.raw` field is the full AX tree (~3x larger); pass `--no-raw` to omit it in agent loops (on older binaries without the flag, use `jq 'del(.data.raw)'`).
+For `ui --json`, prefer `data.outline` / `data.entries` / `data.lists`. The `data.raw` field is the full platform tree (iOS AX, Android bridge tree, or HarmonyOS UITest dumpLayout) and is much larger; omit with `jq 'del(.data.raw)'` in agent loops.

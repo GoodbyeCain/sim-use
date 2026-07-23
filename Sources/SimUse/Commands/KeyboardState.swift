@@ -58,19 +58,21 @@ struct KeyboardState: SimUseExecutableCommand {
     )
 
     @OptionGroup var device: DeviceOptions
+    @OptionGroup var targetPlatform: TargetPlatformOptions
 
     @OptionGroup var json: JSONOutputOptions
 
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve(allowPhysical: true)
+        try device.resolve(platform: targetPlatform.platform, allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
+    var daemonBypass: Bool { device.resolvedPlatform == .harmonyOS }
 
     func execute() async throws -> ExecutionResult {
-        switch PlatformRouter.resolve(udid: device.resolved) {
+        switch device.resolvedPlatform {
         case .android:
             let state = try AndroidKeyboardStateCommand.performKeyboardState(udid: device.resolved)
             return ExecutionResult(
@@ -84,7 +86,9 @@ struct KeyboardState: SimUseExecutableCommand {
                 reason: "the accessibility audit channel does not report keyboard visibility.",
                 alternative: "Re-run `sim-use ui` and inspect the outline for the state change you expect instead."
             )
-        case .iOSSim, .none:
+        case .harmonyOS:
+            throw CLIError(errorDescription: "HarmonyOS does not expose keyboard visibility through the stable hdc/UITest CLI.")
+        case .iOSSim:
             let sub = makeIOSSubcommand()
             return try await sub.execute()
         }

@@ -3,6 +3,7 @@ import ArgumentParser
 import Foundation
 import SimUseCore
 import AndroidBackend
+import HarmonyOSBackend
 import iOSSimBackend
 
 /// Top-level cross-platform `multi-touch` verb. Owns the verb-specific
@@ -36,8 +37,8 @@ struct MultiTouch: SimUseExecutableCommand {
         in scripts.
 
         `--steps` and `--step-ms` are iOS-HID-specific (controlling
-        Move-event granularity) and silently ignored on Android, where
-        `dispatchGesture` interpolates the stroke internally.
+        Move-event granularity) and silently ignored on Android / HarmonyOS,
+        where the platform input primitive interpolates the stroke internally.
 
         Examples:
           # Pinch-zoom out by moving two fingers apart vertically.
@@ -81,10 +82,10 @@ struct MultiTouch: SimUseExecutableCommand {
     @Option(name: .customLong("duration"), help: "Gesture duration in seconds. Default 0.5. Honoured directly on Android; on iOS the wall-clock is the product of --steps × --step-ms when --step-ms is supplied explicitly.")
     var duration: Double = 0.5
 
-    @Option(name: .customLong("steps"), help: "iOS-HID Move-event count between Down and Up. Default 10. Silently ignored on Android.")
+    @Option(name: .customLong("steps"), help: "iOS-HID Move-event count between Down and Up. Default 10. Silently ignored on Android and HarmonyOS.")
     var steps: Int = 10
 
-    @Option(name: .customLong("step-ms"), help: "Sleep between iOS-HID Move events (ms). Default derived from --duration / --steps. Silently ignored on Android.")
+    @Option(name: .customLong("step-ms"), help: "Sleep between iOS-HID Move events (ms). Default derived from --duration / --steps. Silently ignored on Android and HarmonyOS.")
     var stepMs: Int?
 
     @Option(name: .customLong("pre-delay"), help: "Delay before the gesture in seconds.")
@@ -94,16 +95,18 @@ struct MultiTouch: SimUseExecutableCommand {
     var postDelay: Double?
 
     @OptionGroup var device: DeviceOptions
+    @OptionGroup var targetPlatform: TargetPlatformOptions
 
     @OptionGroup var json: JSONOutputOptions
 
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve(allowPhysical: true)
+        try device.resolve(platform: targetPlatform.platform, allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
+    var daemonBypass: Bool { device.resolvedPlatform == .harmonyOS }
 
     func format(_ result: ExecutionResult) -> CommandOutput {
         .line("✓ multi-touch (\(x1),\(y1))/(\(x2),\(y2)) → (\(x1End),\(y1End))/(\(x2End),\(y2End)) completed")
@@ -120,7 +123,7 @@ struct MultiTouch: SimUseExecutableCommand {
     }
 
     func execute() async throws -> ExecutionResult {
-        switch PlatformRouter.resolve(udid: device.resolved) {
+        switch device.resolvedPlatform {
         case .android:
             return try await executeAndroid()
         case .iOSDevice:
@@ -129,7 +132,9 @@ struct MultiTouch: SimUseExecutableCommand {
                 reason: "multi-touch is coordinate HID, and the accessibility audit channel exposes no coordinate input.",
                 alternative: "Interact through accessibility actions instead: `sim-use ui` reads the outline, then `sim-use tap '#<id>' / --label` activates an element."
             )
-        case .iOSSim, .none:
+        case .harmonyOS:
+            return try await executeHarmonyOS()
+        case .iOSSim:
             return try await executeIOSSim()
         }
     }
@@ -178,6 +183,22 @@ struct MultiTouch: SimUseExecutableCommand {
             duration: duration,
             preDelay: nil,
             postDelay: nil
+        )
+        if let postDelay, postDelay > 0 {
+            try await Task.sleep(nanoseconds: UInt64(postDelay * 1_000_000_000))
+        }
+        return ExecutionResult()
+    }
+
+    private func executeHarmonyOS() async throws -> ExecutionResult {
+        if let preDelay, preDelay > 0 {
+            try await Task.sleep(nanoseconds: UInt64(preDelay * 1_000_000_000))
+        }
+        try HarmonyOSMultiTouchCommand.performMultiTouch(
+            connectKey: device.resolved,
+            startP1: (x1, y1), startP2: (x2, y2),
+            endP1: (x1End, y1End), endP2: (x2End, y2End),
+            duration: duration
         )
         if let postDelay, postDelay > 0 {
             try await Task.sleep(nanoseconds: UInt64(postDelay * 1_000_000_000))

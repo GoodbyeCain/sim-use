@@ -4,7 +4,8 @@ import Foundation
 /// Canonical whitespace normalization and the exact-first /
 /// collapsed-fallback matching policy shared by every text selector
 /// surface: the iOS `AccessibilityTargetResolver`, the Android
-/// `AndroidSelectorResolver`, and both platforms' outline renderers.
+/// `AndroidSelectorResolver`, the HarmonyOS target resolver, and all
+/// platform outline renderers.
 ///
 /// The outline renders a multi-line label whitespace-collapsed so the
 /// element line stays on one line; an agent then copies that collapsed

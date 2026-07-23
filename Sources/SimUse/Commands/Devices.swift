@@ -3,6 +3,7 @@ import ArgumentParser
 import Foundation
 import SimUseCore
 import AndroidBackend
+import HarmonyOSBackend
 import iOSSimBackend
 import iOSDeviceBackend
 
@@ -12,13 +13,12 @@ import iOSDeviceBackend
 struct Devices: SimUseExecutableCommand {
     static let configuration = CommandConfiguration(
         commandName: "devices",
-        abstract: "List connected devices across iOS Simulators, Android devices and physical iPhones/iPads.",
+        abstract: "List connected devices across iOS Simulators, Android, physical iPhones/iPads, and HarmonyOS.",
         discussion: """
         Aggregates `xcrun simctl list devices` (iOS Simulators),
-        `adb devices` (Android devices / emulators) and FBDeviceControl
-        discovery (physical iPhones / iPads over USB) into a single
-        unified table. `kind` distinguishes the carrier — simulator,
-        emulator or physical — orthogonally to the platform.
+        `adb devices` (Android devices / emulators), FBDeviceControl
+        discovery (physical iPhones / iPads), and `hdc list targets`
+        (HarmonyOS devices / emulators) into a single unified table.
 
         Default lists only devices sim-use can talk to right now
         (iOS `Booted`, Android `device`). Pass `--all` to include
@@ -34,6 +34,7 @@ struct Devices: SimUseExecutableCommand {
           sim-use devices --all                    # also include shutdown / offline
           sim-use devices --platform ios           # iOS only (simulators + physical)
           sim-use devices --no-physical-ios        # skip FBDeviceControl discovery entirely
+          sim-use devices --platform harmonyos     # HarmonyOS targets only
           sim-use devices --json                   # structured output (Viewer, scripts, agents)
 
         JSON envelope (--json):
@@ -42,7 +43,7 @@ struct Devices: SimUseExecutableCommand {
             "data": {
               "devices": [
                 {"deviceId": "...",
-                 "name": "...", "platform": "ios|android",
+                 "name": "...", "platform": "ios|android|harmonyos",
                  "kind": "simulator|emulator|physical",
                  "state": "Booted|Shutdown|device|offline|...", "runtime": "iOS 18.6|Android|..."},
                 ...
@@ -79,13 +80,17 @@ struct Devices: SimUseExecutableCommand {
         async let iosFuture = listIOS()
         async let androidFuture = listAndroid()
         async let physicalFuture = listPhysicalIOS()
+        async let harmonyFuture = listHarmonyOS()
         let iosResult = await iosFuture
         let androidResult = await androidFuture
         let physicalResult = await physicalFuture
+        let harmonyResult = await harmonyFuture
 
         var combined: [Device] = []
-        if platform != .android { combined.append(contentsOf: iosResult.devices + physicalResult.devices) }
-        if platform != .ios     { combined.append(contentsOf: androidResult.devices) }
+        if platform == nil || platform == .ios { combined.append(contentsOf: iosResult.devices) }
+        if platform == nil || platform == .ios { combined.append(contentsOf: physicalResult.devices) }
+        if platform == nil || platform == .android { combined.append(contentsOf: androidResult.devices) }
+        if platform == nil || platform == .harmonyos { combined.append(contentsOf: harmonyResult.devices) }
 
         if !includeAll {
             combined = combined.filter { $0.isUsable }
@@ -108,9 +113,9 @@ struct Devices: SimUseExecutableCommand {
         // surface a single-line summary so a user running plain
         // `sim-use devices` on a host with no tooling sees something
         // more actionable than "No devices found".
-        if combined.isEmpty, iosResult.failed, androidResult.failed, physicalResult.failed, platform == nil {
+        if combined.isEmpty, iosResult.failed, androidResult.failed, physicalResult.failed, harmonyResult.failed, platform == nil {
             FileHandle.standardError.write(Data(
-                "warning: iOS (simctl), Android (adb) and physical-iOS (FBDeviceControl) listings all failed; pass --platform ios|android to scope, or install the missing tooling.\n".utf8
+                "warning: iOS (simctl), Android (adb), and HarmonyOS (hdc) listings all failed; pass --platform ios|android|harmonyos to scope, or install the missing tooling.\n".utf8
             ))
         }
         return ExecutionResult(devices: combined)
@@ -128,7 +133,7 @@ struct Devices: SimUseExecutableCommand {
 
     private func listIOS() async -> SideResult {
         // If --platform=android, skip the simctl call entirely.
-        if platform == .android { return SideResult(devices: [], failed: false) }
+        if platform != nil, platform != .ios { return SideResult(devices: [], failed: false) }
         do {
             // We always fetch the full list (not `simctl ... booted`)
             // because the `--all` flag changes intent at runtime and
@@ -143,7 +148,7 @@ struct Devices: SimUseExecutableCommand {
     }
 
     private func listAndroid() async -> SideResult {
-        if platform == .ios { return SideResult(devices: [], failed: false) }
+        if platform != nil, platform != .android { return SideResult(devices: [], failed: false) }
         do {
             // adb may simply be unavailable on hosts that don't do
             // Android work; that's not an error worth derailing the
@@ -157,7 +162,7 @@ struct Devices: SimUseExecutableCommand {
     }
 
     private func listPhysicalIOS() async -> SideResult {
-        if platform == .android || noPhysicalIOS { return SideResult(devices: [], failed: false) }
+        if (platform != nil && platform != .ios) || noPhysicalIOS { return SideResult(devices: [], failed: false) }
         do {
             // FBDeviceControl discovery pumps the main run loop until the
             // attachment set quiesces (~0.4 s attached, ~1 s empty-grace
@@ -168,6 +173,17 @@ struct Devices: SimUseExecutableCommand {
             return SideResult(devices: devices.map(\.unifiedDevice), failed: false)
         } catch {
             FileHandle.standardError.write(Data("warning: physical iOS device listing failed: \(error.localizedDescription)\n".utf8))
+            return SideResult(devices: [], failed: true)
+        }
+    }
+
+    private func listHarmonyOS() async -> SideResult {
+        if platform != nil, platform != .harmonyos { return SideResult(devices: [], failed: false) }
+        do {
+            let devices = try HarmonyDeviceController().listUnifiedDevices()
+            return SideResult(devices: devices, failed: false)
+        } catch {
+            FileHandle.standardError.write(Data("warning: HarmonyOS device listing failed: \(error.localizedDescription)\n".utf8))
             return SideResult(devices: [], failed: true)
         }
     }
@@ -198,11 +214,5 @@ struct Devices: SimUseExecutableCommand {
         var out = [line(headers)]
         out.append(contentsOf: rows.map(line))
         return out.joined(separator: "\n")
-    }
-}
-
-extension Device.Platform: ExpressibleByArgument {
-    public init?(argument: String) {
-        self.init(rawValue: argument.lowercased())
     }
 }

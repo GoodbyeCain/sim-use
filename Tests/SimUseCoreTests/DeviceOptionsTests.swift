@@ -18,6 +18,12 @@ private struct AndroidProbeCommand: ParsableArguments {
     init() {}
 }
 
+private struct TargetProbeCommand: ParsableArguments {
+    @OptionGroup var device: DeviceOptions
+    @OptionGroup var targetPlatform: TargetPlatformOptions
+    init() {}
+}
+
 @Suite("DeviceOptions — parsing")
 struct DeviceOptionsParseTests {
     @Test("explicit --device lands in device property, resolved stays empty pre-resolve")
@@ -47,6 +53,12 @@ struct DeviceOptionsParseTests {
     func equalsFormParses() throws {
         let probe = try ProbeCommand.parse(["--device=FAKE-ID"])
         #expect(probe.device.device == "FAKE-ID")
+    }
+
+    @Test("--platform harmonyos parses as an explicit backend override")
+    func harmonyOSPlatformParses() throws {
+        let probe = try TargetProbeCommand.parse(["--platform", "harmonyos", "--device", "FAKE-ID"])
+        #expect(probe.targetPlatform.platform == .harmonyos)
     }
 }
 
@@ -129,6 +141,17 @@ struct DeviceOptionsResolveTests {
         var probe = try ProbeCommand.parse(["--udid", "emulator-5554"])
         try probe.device.resolve()
         #expect(probe.device.resolved == "emulator-5554")
+    }
+
+    @Test("HarmonyOS override wins even when the connect-key looks like an adb serial")
+    func harmonyOSOverrideWins() throws {
+        var probe = try TargetProbeCommand.parse([
+            "--platform", "harmonyos",
+            "--device", "192.168.1.5:5555",
+        ])
+        try probe.device.resolve(platform: probe.targetPlatform.platform)
+        #expect(probe.device.resolved == "192.168.1.5:5555")
+        #expect(probe.device.resolvedPlatform == .harmonyOS)
     }
 
     @Test("whitespace-only --device does not short-circuit the bypass")

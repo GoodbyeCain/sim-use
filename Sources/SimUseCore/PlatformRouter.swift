@@ -2,13 +2,13 @@
 import Foundation
 
 /// The platforms `sim-use` can target: iOS Simulator, Android
-/// (device or emulator), and physical iOS devices (the accessibility
-/// audit channel — a restricted capability set; see
-/// `TargetCapabilityError`).
+/// (device or emulator), physical iOS devices (the accessibility audit
+/// channel), and HarmonyOS targets.
 public enum Platform: Equatable {
     case iOSSim
     case android
     case iOSDevice
+    case harmonyOS
 }
 
 /// Centralises the UDID-shape heuristics used to decide which backend
@@ -28,13 +28,14 @@ public enum PlatformRouter {
     /// Classify a UDID into a target platform. Returns `nil` when the
     /// shape doesn't fit any known platform; callers can choose to fail
     /// fast or fall back to a default.
-    ///
-    /// Physical iOS devices listed by ECID (AMDevice publishes the
-    /// lockdown UDID lazily) are invisible to shape-based routing — a
-    /// bare ECID resolves as `.android` or `nil`, never `.iOSDevice`.
-    /// Documented non-goal (#115); the `ios-device` namespace accepts
-    /// ECIDs directly.
-    public static func resolve(udid: String) -> Platform? {
+    public static func resolve(udid: String, override: Device.Platform? = nil) -> Platform? {
+        if let override {
+            switch override {
+            case .ios: return .iOSSim
+            case .android: return .android
+            case .harmonyos: return .harmonyOS
+            }
+        }
         let trimmed = udid.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return nil }
         if looksLikeAndroid(trimmed) { return .android }
