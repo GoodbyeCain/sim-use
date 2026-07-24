@@ -20,6 +20,8 @@ Notarized Homebrew packages retain their original Developer ID signature after i
 
 ### Fixed
 
+- HarmonyOS `tap @N` now promotes a non-clickable leaf (for example, an app-name `StaticText` on the launcher) to the center of its nearest enabled clickable ancestor when writing the outline cache. The printed / JSON frame remains the leaf's real semantic frame, disabled ancestors do not get bypassed, and near-full-screen structural wrappers are not promoted. Re-run `ui` once after upgrading to refresh existing HarmonyOS alias caches.
+
 - Homebrew: preserve the upstream signature for notarized releases instead of replacing it with an ad-hoc signature. Release installation checks now use the same formula generator and verify that Homebrew leaves the signed binary unchanged.
 
 ## [0.16.0] - 2026-10-21

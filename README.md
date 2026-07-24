@@ -532,6 +532,8 @@ The outline uses region banding (`[Top]` / `[Content]` / `[Bottom]` / declared `
 
 A list cluster detector runs on every snapshot and attaches `#N` aliases to detected list cells — outline lines render as `@N #M` (dominant list) or `@N #M@S` (scope `S>1`). The `--json` envelope adds a `lists` array (one summary per cluster, ordered by detector score, dominant first) and per-cell membership under `entries[*].aliases.list`.
 
+On HarmonyOS, a visible label may be a non-clickable leaf inside an actionable component (launcher app names are a common example). The outline and JSON preserve that leaf's real frame, while its cached `@N` activation point is promoted to the center of the nearest enabled `clickable` ancestor. Explicit coordinates are never promoted. Run `ui` after upgrading or after navigation so the cache reflects the current tree and activation points.
+
 ### App state & crash detection
 
 ```bash

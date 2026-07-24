@@ -133,6 +133,8 @@ Rules for this experimental surface:
 
 If `ui` succeeds with zero elements or `tap` prints success for a missing/ambiguous label, treat it as a sim-use bug; the command is expected to fail loudly instead.
 
+HarmonyOS uses hdc directly: use the platform namespace or pass --platform harmonyos with top-level commands.
+
 ## 2. Pitfalls
 
 Quick symptom index — see `references/pitfalls.md` for detailed recipes.
@@ -145,6 +147,10 @@ Quick symptom index — see `references/pitfalls.md` for detailed recipes.
 | `multipleMatches` error | Several elements share the selector | Use `--frame`, `--element-type`, or a more specific selector |
 | Tap lands but nothing happens | Animation in progress, or element not yet interactive | Add `--pre-delay 0.3` or `--wait-timeout 3` |
 | iOS: `paste` fails or text is missing | No focused field, a custom edit menu, a paste prompt, or an external clipboard writer | Focus the field, or use `paste --via-menu --target-id <id>`; inspect prompts and verify the actual field. Do not switch to `type` as a Unicode substitute |
+| HarmonyOS target | Add `--platform harmonyos --device <connect-key>`, or use `sim-use harmonyos <verb>` |
+| HarmonyOS command routes to Android | adb and hdc IDs can have the same shape | Add `--platform harmonyos`, or use the `sim-use harmonyos` namespace |
+| HarmonyOS text alias taps the label but not its control | The alias cache predates clickable-ancestor promotion | Re-run `ui` once, then use the fresh `@N` alias |
+| HarmonyOS `keyboard-state`, `record-video`, `app-state`, or rotate fails | No stable cross-device hdc / UITest primitive is available | Use supported UI, input, gesture, and screenshot verbs; do not retry the unsupported command |
 | Android: `paste` denied | Background clipboard access blocked | Use `type` instead |
 | Outline shows `U+FFFC` in label | iOS icon placeholder character | Match with `--label-regex` excluding the prefix |
 | `[i] … covers ~N% of the screen` warning (text output, or `--json` top-level `advisory` key) | The selector resolved to a near-full-screen wrapper (common on Flutter/canvas UIs) and the tap hit its center, likely missing the intended control | Re-run `ui` and target the control via `@N`/`#<id>`, or pass explicit `-x/-y`/`--point` |

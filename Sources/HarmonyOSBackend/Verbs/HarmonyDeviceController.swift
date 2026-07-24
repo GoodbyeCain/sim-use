@@ -58,12 +58,17 @@ public final class HarmonyDeviceController {
             throw HarmonyOSError.malformedOutput("UITest dumpLayout JSON could not be decoded: \(error.localizedDescription)")
         }
 
-        let outline = HarmonyOutlineRenderer.render(
+        let rendered = HarmonyOutlineRenderer.renderWithActivationPoints(
             root: root,
             options: .init(filterOffscreen: !includeOffscreen)
         )
+        let outline = rendered.outline
+        let cacheKey = Self.cacheKey(for: connectKey)
         do {
-            try OutlineCache.write(outline: outline, udid: Self.cacheKey(for: connectKey))
+            try OutlineCache.writePayload(
+                rendered.cachePayload(udid: cacheKey),
+                udid: cacheKey
+            )
         } catch {
             FileHandle.standardError.write(Data(
                 "warning: failed to write HarmonyOS outline cache for \(connectKey): \(error.localizedDescription)\n".utf8
