@@ -103,6 +103,8 @@ UITest attributes remain stored as `[String: JSONValue]` because the platform ad
 
 Whitespace is collapsed through `SelectorTextMatcher`, so text copied from the one-line outline round-trips through label selectors. Offscreen and invisible nodes are filtered by default. The raw UITest tree remains available in JSON for consumers needing platform-specific fields.
 
+UITest commonly exposes a visible text leaf separately from the component that handles input. During rendering, the backend tracks the nearest enabled `clickable` ancestor for each entry. The outline and JSON keep the leaf's semantic frame, while the HarmonyOS alias cache stores the ancestor center as the `@N` activation point. Disabled ancestors block promotion, and ancestors covering at least 90% of the screen are treated as structural wrappers rather than activation targets.
+
 ## Process execution and artifacts
 
 `Hdc` resolves the binary in this order:

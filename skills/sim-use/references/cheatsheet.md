@@ -30,6 +30,8 @@ sim-use tap -x 100 -y 200              # absolute coordinates (last resort)
 sim-use tap --point 100,200             # same, pair form
 ```
 
+HarmonyOS keeps the semantic leaf frame in `ui` output but caches the center of the nearest enabled clickable ancestor for a non-clickable leaf alias. This makes an app-name `StaticText` alias activate its launcher icon. Re-run `ui` after upgrading to refresh old alias caches; explicit coordinates remain literal.
+
 ## Disambiguating with --frame
 
 Narrow matches by screen region when selectors collide:

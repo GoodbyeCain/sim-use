@@ -392,6 +392,8 @@ The outline uses region banding (`[Top]` / `[Content]` / `[Bottom]` / declared `
 
 On iOS / Android, a list cluster detector attaches `#N` aliases to detected list cells. Outline lines for cells render as `@N #M` (dominant list) or `@N #M@S` (scope `S>1`); the `--json` envelope adds a sibling `lists` array, ordered by detector score, where each entry summarises one cluster as `{ scope, cellCount, cellHeight, containerRole, containerLabel, bbox, score }`. Per-cell membership is also surfaced through `entries[*].aliases.list = { scope, index }` so consumers can pivot on either shape. `lists[0]` is always the dominant cluster, or the array is empty when nothing list-shaped is on screen. HarmonyOS currently exposes `@N` and `#<id>` aliases but does not infer list-cell aliases.
 
+On HarmonyOS, a visible label may be a non-clickable leaf inside an actionable component (launcher app names are a common example). The outline and JSON preserve that leaf's real frame, while its cached `@N` activation point is promoted to the center of the nearest enabled `clickable` ancestor. Explicit coordinates are never promoted. Run `ui` after upgrading or after navigation so the cache reflects the current tree and activation points.
+
 ### App state & crash detection
 
 ```bash

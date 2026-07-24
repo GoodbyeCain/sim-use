@@ -22,6 +22,14 @@ Detailed solutions for common sim-use issues. The symptom index in SKILL.md poin
 
 **Rule:** Always re-run `sim-use ui` after any action that changes the screen (navigation, dismissing a dialog, scrolling). Then use the fresh `@N` values.
 
+## HarmonyOS: text alias does not activate its control
+
+**Symptom:** `tap @N` reports success on a HarmonyOS label such as a launcher app name, but the screen does not change.
+
+**Why:** Older HarmonyOS alias caches stored the center of the non-clickable text leaf. Current builds preserve the text frame in `ui` output but cache the center of its nearest enabled clickable ancestor.
+
+**Recipe:** Re-run `sim-use harmonyos ui` once to refresh the cache, then use the new `@N`. If the target has no clickable ancestor, use the actionable parent alias / `#<id>` shown by `ui`, or an explicit coordinate as a last resort.
+
 ## iOS: rotated simulator
 
 **Symptom:** The `App:` header shows an orientation tag like `(landscape-right)` or `(portrait-upside-down)`, or a tap emits an `[i] Screen orientation could not be confirmed…` advisory.

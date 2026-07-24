@@ -12,9 +12,51 @@ public enum HarmonyOutlineRenderer {
     private struct Candidate {
         let node: HarmonyElementNode
         let frame: Outline.Frame
+        let tapFrame: Outline.Frame?
         let depth: Int
         let role: String
         let label: String
+    }
+
+    struct ActivationPoint: Equatable, Sendable {
+        let x: Int
+        let y: Int
+    }
+
+    struct RenderedOutline: Equatable, Sendable {
+        let outline: Outline
+        let activationPoints: [Int: ActivationPoint]
+
+        func cachePayload(
+            udid: String,
+            capturedAt: Date = Date()
+        ) -> OutlineCache.Payload {
+            let base = OutlineCache.makePayload(
+                outline: outline,
+                udid: udid,
+                capturedAt: capturedAt
+            )
+            let entries = base.entries.map { entry in
+                let point = activationPoints[entry.aliases.at]
+                return OutlineCache.Payload.Entry(
+                    aliases: entry.aliases,
+                    role: entry.role,
+                    label: entry.label,
+                    x: point?.x ?? entry.x,
+                    y: point?.y ?? entry.y,
+                    w: entry.w,
+                    h: entry.h
+                )
+            }
+            return OutlineCache.Payload(
+                version: base.version,
+                udid: base.udid,
+                capturedAt: base.capturedAt,
+                screen: base.screen,
+                entries: entries,
+                orientation: base.orientation
+            )
+        }
     }
 
     private struct DedupKey: Hashable {
@@ -24,12 +66,27 @@ public enum HarmonyOutlineRenderer {
     }
 
     public static func render(root: HarmonyElementNode, options: Options = .default) -> Outline {
+        renderWithActivationPoints(root: root, options: options).outline
+    }
+
+    static func renderWithActivationPoints(
+        root: HarmonyElementNode,
+        options: Options = .default
+    ) -> RenderedOutline {
         let screen = screenFrame(root)
         let appPackage = firstNonEmpty(root, keyPath: \HarmonyElementNode.bundleName) ?? "HarmonyOS App"
         let appLabel = firstNonEmpty(root, keyPath: \HarmonyElementNode.abilityName) ?? appPackage
 
         var candidates: [Candidate] = []
-        walk(root, depth: 0, screen: screen, options: options, into: &candidates)
+        walk(
+            root,
+            depth: 0,
+            screen: screen,
+            options: options,
+            inheritedTapFrame: nil,
+            interactionBlocked: false,
+            into: &candidates
+        )
         candidates.sort {
             if $0.frame.y != $1.frame.y { return $0.frame.y < $1.frame.y }
             if $0.frame.x != $1.frame.x { return $0.frame.x < $1.frame.x }
@@ -38,6 +95,7 @@ public enum HarmonyOutlineRenderer {
 
         var seen = Set<DedupKey>()
         var entries: [Outline.Entry] = []
+        var activationPoints: [Int: ActivationPoint] = [:]
         for candidate in candidates {
             let label = SelectorTextMatcher.collapseWhitespace(candidate.label)
             let key = DedupKey(role: candidate.role, label: label, frame: candidate.frame)
@@ -48,8 +106,9 @@ public enum HarmonyOutlineRenderer {
             let value = candidate.node.text.isEmpty || candidate.node.text == candidate.label
                 ? nil
                 : candidate.node.text
+            let alias = entries.count + 1
             entries.append(Outline.Entry(
-                aliases: Outline.Aliases(at: entries.count + 1),
+                aliases: Outline.Aliases(at: alias),
                 role: candidate.role,
                 label: label,
                 frame: candidate.frame,
@@ -61,10 +120,23 @@ public enum HarmonyOutlineRenderer {
                 hint: candidate.node.hint.isEmpty ? nil : candidate.node.hint,
                 depth: candidate.depth
             ))
+            activationPoints[alias] = activationPoint(
+                semanticFrame: candidate.frame,
+                tapFrame: candidate.tapFrame,
+                screen: screen
+            )
         }
 
         let text = renderText(appLabel: appLabel, screen: screen, entries: entries)
-        return Outline(text: text, entries: entries, screen: screen, appLabel: appLabel)
+        return RenderedOutline(
+            outline: Outline(
+                text: text,
+                entries: entries,
+                screen: screen,
+                appLabel: appLabel
+            ),
+            activationPoints: activationPoints
+        )
     }
 
     public static func appPackage(root: HarmonyElementNode) -> String {
@@ -76,21 +148,80 @@ public enum HarmonyOutlineRenderer {
         depth: Int,
         screen: Outline.Frame,
         options: Options,
+        inheritedTapFrame: Outline.Frame?,
+        interactionBlocked: Bool,
         into output: inout [Candidate]
     ) {
-        if let frame = node.frame,
+        let frame = node.frame
+        let blocked = interactionBlocked || node.bool("enabled") == false
+        let tapFrame: Outline.Frame?
+        if blocked {
+            tapFrame = nil
+        } else if node.bool("clickable") == true, let frame {
+            tapFrame = frame
+        } else {
+            tapFrame = inheritedTapFrame
+        }
+
+        if let frame,
            shouldInclude(node, frame: frame, screen: screen, options: options) {
             output.append(Candidate(
                 node: node,
                 frame: frame,
+                tapFrame: tapFrame,
                 depth: depth,
                 role: canonicalRole(node),
                 label: node.primaryLabel
             ))
         }
         for child in node.children {
-            walk(child, depth: depth + 1, screen: screen, options: options, into: &output)
+            walk(
+                child,
+                depth: depth + 1,
+                screen: screen,
+                options: options,
+                inheritedTapFrame: tapFrame,
+                interactionBlocked: blocked,
+                into: &output
+            )
         }
+    }
+
+    private static func activationPoint(
+        semanticFrame: Outline.Frame,
+        tapFrame: Outline.Frame?,
+        screen: Outline.Frame
+    ) -> ActivationPoint {
+        let semanticCenter = ActivationPoint(
+            x: semanticFrame.x + semanticFrame.width / 2,
+            y: semanticFrame.y + semanticFrame.height / 2
+        )
+        guard let tapFrame else { return semanticCenter }
+        guard tapFrame != semanticFrame else {
+            return ActivationPoint(
+                x: tapFrame.x + tapFrame.width / 2,
+                y: tapFrame.y + tapFrame.height / 2
+            )
+        }
+
+        let containsSemanticCenter = semanticCenter.x >= tapFrame.x
+            && semanticCenter.x < tapFrame.x + tapFrame.width
+            && semanticCenter.y >= tapFrame.y
+            && semanticCenter.y < tapFrame.y + tapFrame.height
+        guard containsSemanticCenter else { return semanticCenter }
+
+        let screenArea = Double(screen.width) * Double(screen.height)
+        let tapArea = Double(tapFrame.width) * Double(tapFrame.height)
+        if screenArea > 0, tapArea / screenArea >= 0.9 {
+            // A full-screen clickable wrapper is commonly structural. Moving a
+            // text alias to its center would be less reliable than preserving
+            // the leaf point, so only tightly-scoped ancestors are promoted.
+            return semanticCenter
+        }
+        return ActivationPoint(
+            x: tapFrame.x + tapFrame.width / 2,
+            y: tapFrame.y + tapFrame.height / 2
+        )
     }
 
     private static func shouldInclude(

@@ -40,7 +40,7 @@ Pick a selector, in order of preference:
 
 | Selector | When to use |
 |---|---|
-| `tap @N` | Right after `ui`. Fastest, cache-backed. |
+| `tap @N` | Right after `ui`. Fastest, cache-backed. HarmonyOS promotes non-clickable leaves to their nearest enabled clickable ancestor. |
 | `tap #<id>` | Stable across minor layout changes. Paste from the outline. |
 | `tap --label 'X'` | Scripted flows. Combine with `--wait-timeout` for transitions. |
 | `tap --label-regex '...'` | Dynamic labels with counters/timestamps. Anchor with `^...$`. |
@@ -136,6 +136,7 @@ Quick symptom index — see `references/pitfalls.md` for detailed recipes.
 | iOS: `paste` drops text | Soft keyboard only; HID Cmd+V is ignored | Use `paste --via-menu --target-id <id>` |
 | Android: `paste` denied | Background clipboard access blocked | Use `type` instead |
 | HarmonyOS command routes to Android | adb and hdc IDs can have the same shape | Add `--platform harmonyos`, or use the `sim-use harmonyos` namespace |
+| HarmonyOS text alias taps the label but not its control | The alias cache predates clickable-ancestor promotion | Re-run `ui` once, then use the fresh `@N` alias |
 | HarmonyOS `keyboard-state`, `record-video`, `app-state`, or rotate fails | No stable cross-device hdc / UITest primitive is available | Use supported UI, input, gesture, and screenshot verbs; do not retry the unsupported command |
 | Outline shows `U+FFFC` in label | iOS icon placeholder character | Match with `--label-regex` excluding the prefix |
 | `[i] … covers ~N% of the screen` warning (text output, or `--json` top-level `advisory` key) | The selector resolved to a near-full-screen wrapper (common on Flutter/canvas UIs) and the tap hit its center, likely missing the intended control | Re-run `ui` and target the control via `@N`/`#<id>`, or pass explicit `-x/-y`/`--point` |
