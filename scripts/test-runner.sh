@@ -63,6 +63,7 @@ show_usage() {
     echo "  TypeTests           Run only type tests"
     echo "  ButtonTests         Run only button tests"
     echo "  GestureTests        Run only gesture tests"
+    echo "  HIDRebootRecoveryTests Run only the reboot recovery test (reboots the simulator)"
     echo "  ListSimulatorsTests Run only list simulators tests"
     echo ""
     echo "Examples:"
@@ -107,7 +108,7 @@ while [[ $# -gt 0 ]]; do
             VERBOSE=true
             shift
             ;;
-        SwipeTests|TapTests|KeyTests|TouchTests|TypeTests|ButtonTests|GestureTests|ListSimulatorsTests)
+        SwipeTests|TapTests|KeyTests|TouchTests|TypeTests|ButtonTests|GestureTests|HIDRebootRecoveryTests|ListSimulatorsTests)
             TEST_FILTER="$1"
             shift
             ;;
@@ -206,6 +207,12 @@ build_sim_use() {
 
     local sim_use_bin_path
     sim_use_bin_path="$(swift build --show-bin-path)/sim-use"
+
+    # Hand the resolved binary path to the test suites. Resolving it from
+    # inside a running `swift test` deadlocks on SwiftBuild-backend
+    # toolchains (Xcode 26.6+/27): the test run holds the package lock that
+    # a child `swift build --show-bin-path` then waits on forever.
+    export SIM_USE_TEST_BINARY="$sim_use_bin_path"
 
     # Verify the executable exists
     if [[ -f "$sim_use_bin_path" ]]; then
@@ -321,6 +328,7 @@ run_tests() {
             "ButtonTests"
             "DescribeUITests"
             "GestureTests"
+            "HIDRebootRecoveryTests"
             "InitTests"
             "KeyboardStateTests"
             "KeyComboTests"

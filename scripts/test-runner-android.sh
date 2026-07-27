@@ -124,6 +124,11 @@ build_sim_use() {
         print_error "sim-use binary not found at $SIM_USE"
         exit 1
     fi
+    # Hand the resolved binary path to the test suites; resolving it from
+    # inside a running `swift test` deadlocks on SwiftBuild-backend
+    # toolchains (Xcode 26.6+/27) — the test run holds the package lock a
+    # child `swift build --show-bin-path` then waits on.
+    export SIM_USE_TEST_BINARY="$SIM_USE"
     print_success "sim-use built: $SIM_USE"
 }
 

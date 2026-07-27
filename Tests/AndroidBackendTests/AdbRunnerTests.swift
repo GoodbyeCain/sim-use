@@ -68,27 +68,55 @@ final class AdbRunnerTests: XCTestCase {
     /// every invocation took ≥ 20 ms even when the child exited in
     /// microseconds. The terminationHandler + semaphore replacement
     /// is woken by the kernel, so an unloaded call completes in a
-    /// few ms. Assert on the fastest of 20 calls: scheduler noise
-    /// under parallel-suite load inflates individual calls and any
-    /// summed budget (observed 0.42–0.53 s for 20 calls on loaded
-    /// CI/dev machines — the same order as the floor), but only a
-    /// real per-call floor lifts the minimum of 20 samples above
-    /// 20 ms.
+    /// few ms.
+    ///
+    /// Third design iteration. Absolute thresholds cannot separate
+    /// the floor from machine load: min-of-20 against a flat 20 ms
+    /// bound was observed at 21.5 ms on a busy machine — inside the
+    /// ~22–23 ms a real floor would produce, so relaxing the bound
+    /// would also pass the regression it guards against. Instead,
+    /// pair each runner call with a floorless direct `Process` spawn
+    /// of the same child and compare the two minima: load inflates
+    /// both sides together, while a per-call sleep floor shows up as
+    /// a stable one-sided offset of the full floor (20 ms), far above
+    /// the 15 ms margin.
     func testRunFastChildHasLowLatency() throws {
         let adb = Adb(binaryPath: "/bin/sh", defaultTimeout: 5)
-        // Warm up the dyld / fork+exec path so the timed loop below
-        // measures steady-state cost rather than first-spawn outliers.
+
+        func directSpawn() throws -> TimeInterval {
+            let start = Date()
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", ":"]
+            try process.run()
+            process.waitUntilExit()
+            return Date().timeIntervalSince(start)
+        }
+
+        // Warm up the dyld / fork+exec path on both sides so the timed
+        // loop measures steady-state cost rather than first-spawn
+        // outliers.
         _ = try adb.run(args: ["-c", ":"])
-        var fastest = TimeInterval.infinity
+        _ = try directSpawn()
+
+        var fastestAdb = TimeInterval.infinity
+        var fastestDirect = TimeInterval.infinity
+        // Interleave the two so both sample the same load conditions.
         for _ in 0..<20 {
+            fastestDirect = min(fastestDirect, try directSpawn())
             let start = Date()
             _ = try adb.run(args: ["-c", ":"])
-            fastest = min(fastest, Date().timeIntervalSince(start))
+            fastestAdb = min(fastestAdb, Date().timeIntervalSince(start))
         }
+
         XCTAssertLessThan(
-            fastest,
-            0.02,
-            "the fastest of 20 adb invocations should undercut the 20 ms polling floor; got \(fastest)s"
+            fastestAdb,
+            fastestDirect + 0.015,
+            """
+            the fastest of 20 runner invocations should track the fastest \
+            direct spawn (a per-call polling floor adds a stable ~20 ms); \
+            got runner \(fastestAdb)s vs direct \(fastestDirect)s
+            """
         )
     }
 

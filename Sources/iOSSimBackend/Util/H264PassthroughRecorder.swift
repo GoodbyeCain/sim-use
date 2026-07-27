@@ -33,7 +33,9 @@ public enum H264PassthroughError: Error, LocalizedError, Equatable {
 /// re-encoding. Access units (from `AnnexBStreamParser`) are rewrapped as
 /// AVCC-framed `CMSampleBuffer`s and appended to a passthrough
 /// `AVAssetWriterInput`. Presentation timestamps come from the host arrival
-/// clock, since neither capture source embeds timing.
+/// clock, since the source (Android's `adb screenrecord`, the only remaining
+/// caller — iOS records through idb's native file recorder instead) doesn't
+/// embed timing.
 public final class H264PassthroughRecorder: Sendable {
     /// Mutable + non-Sendable writer state, confined to the lock.
     private struct State {
@@ -49,18 +51,12 @@ public final class H264PassthroughRecorder: Sendable {
     }
 
     private let outputURL: URL
-    /// When set, timestamps are laid out as a constant frame rate
-    /// (`frameIndex / frameRate`) instead of derived from host arrival time.
-    /// This removes the byte-arrival jitter of an eager fixed-rate stream;
-    /// nil keeps the variable-rate host-clock behavior (Android screenrecord).
-    private let frameRate: Int?
     private let state: OSAllocatedUnfairLock<State>
 
     public var framesAppended: Int64 { state.withLock { $0.framesAppended } }
 
-    public init(outputURL: URL, frameRate: Int? = nil) throws {
+    public init(outputURL: URL) throws {
         self.outputURL = outputURL
-        self.frameRate = frameRate
         let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
         self.state = OSAllocatedUnfairLock(initialState: State(writer: writer))
     }
@@ -80,12 +76,7 @@ public final class H264PassthroughRecorder: Sendable {
                 timeout: H264StreamRecorder.readinessTimeout
             )
 
-            let pts: CMTime
-            if let frameRate {
-                pts = CMTime(value: state.framesAppended, timescale: CMTimeScale(frameRate))
-            } else {
-                pts = Self.normalizedPTS(hostTime: hostTime, firstHostTime: firstHostTime, lastPTS: state.lastPTS)
-            }
+            let pts = Self.normalizedPTS(hostTime: hostTime, firstHostTime: firstHostTime, lastPTS: state.lastPTS)
             let sampleBuffer = try Self.makeSampleBuffer(
                 avcc: Self.avccData(for: accessUnit),
                 formatDescription: formatDescription,
@@ -114,26 +105,7 @@ public final class H264PassthroughRecorder: Sendable {
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             state.withLock { state in
-                if let frameRate {
-                    // Hold the last frame for one frame interval past its PTS.
-                    state.writer.endSession(atSourceTime: CMTime(value: state.framesAppended, timescale: CMTimeScale(frameRate)))
-                    // CFR mode trusts the frame count for playback speed: PTS is
-                    // frameIndex/frameRate regardless of how long capture actually
-                    // took. If the stream under-delivers (cold start, encoder still
-                    // releasing from a prior recording), the file silently plays
-                    // back faster than real time — surface that instead of staying
-                    // silent, since callers have no other signal.
-                    if let stopHostTime, let firstHostTime = state.firstHostTime {
-                        let wallClockDuration = stopHostTime - firstHostTime
-                        if Self.isUnderDelivered(framesAppended: state.framesAppended, frameRate: frameRate, wallClockDuration: wallClockDuration) {
-                            let expectedDuration = Double(state.framesAppended) / Double(frameRate)
-                            FileHandle.standardError.write(Data(String(
-                                format: "warning: recording captured %lld frames at %d fps (%.1fs of video) over %.1fs of wall-clock time — the stream under-delivered frames, so playback will run faster than real time\n",
-                                state.framesAppended, frameRate, expectedDuration, wallClockDuration
-                            ).utf8))
-                        }
-                    }
-                } else if let stopHostTime, let firstHostTime = state.firstHostTime {
+                if let stopHostTime, let firstHostTime = state.firstHostTime {
                     let endPTS = Self.normalizedPTS(hostTime: stopHostTime, firstHostTime: firstHostTime, lastPTS: state.lastPTS)
                     state.writer.endSession(atSourceTime: endPTS)
                 }
@@ -226,18 +198,6 @@ public final class H264PassthroughRecorder: Sendable {
             pts = CMTimeAdd(lastPTS, CMTime(value: 1, timescale: 600))
         }
         return pts
-    }
-
-    /// Detects CFR under-delivery: the expected duration (`framesAppended /
-    /// frameRate`) coming in noticeably shorter than the actual wall-clock
-    /// recording time means the encoder produced fewer frames than the
-    /// requested rate demands, so the muxed file will play back faster than
-    /// real time. `threshold` is the fractional shortfall that triggers a
-    /// warning (0.2 = expected duration more than 20% short of wall clock).
-    static func isUnderDelivered(framesAppended: Int64, frameRate: Int, wallClockDuration: TimeInterval, threshold: Double = 0.2) -> Bool {
-        guard wallClockDuration > 0, framesAppended > 0, frameRate > 0 else { return false }
-        let expectedDuration = Double(framesAppended) / Double(frameRate)
-        return expectedDuration < wallClockDuration * (1.0 - threshold)
     }
 
     static func makeFormatDescription(sps: Data, pps: Data) throws -> CMFormatDescription {

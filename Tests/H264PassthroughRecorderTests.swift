@@ -36,34 +36,6 @@ struct H264PassthroughRecorderTests {
         #expect(bumped == CMTimeAdd(second, CMTime(value: 1, timescale: 600)))
     }
 
-    @Test("isUnderDelivered flags a stream that produced far fewer frames than the wall clock demands")
-    func underDeliveryDetected() {
-        // 60 fps requested, but only 77 frames arrived over ~6s of wall clock
-        // (the cold-start case from live testing): expected ~1.28s of CFR
-        // video versus 6s of real time — a severe shortfall.
-        #expect(H264PassthroughRecorder.isUnderDelivered(framesAppended: 77, frameRate: 60, wallClockDuration: 6.0))
-    }
-
-    @Test("isUnderDelivered does not fire when the stream keeps pace with the frame rate")
-    func noUnderDeliveryWhenOnPace() {
-        // 60 fps for ~6s of wall clock should land around 360 frames.
-        #expect(!H264PassthroughRecorder.isUnderDelivered(framesAppended: 355, frameRate: 60, wallClockDuration: 6.0))
-    }
-
-    @Test("isUnderDelivered respects a custom threshold")
-    func underDeliveryThreshold() {
-        // 60 fps for 10s "should" be 600 frames; 500 is a 16.7% shortfall.
-        #expect(!H264PassthroughRecorder.isUnderDelivered(framesAppended: 500, frameRate: 60, wallClockDuration: 10.0, threshold: 0.2))
-        #expect(H264PassthroughRecorder.isUnderDelivered(framesAppended: 500, frameRate: 60, wallClockDuration: 10.0, threshold: 0.1))
-    }
-
-    @Test("isUnderDelivered is false for degenerate inputs")
-    func underDeliveryDegenerateInputs() {
-        #expect(!H264PassthroughRecorder.isUnderDelivered(framesAppended: 0, frameRate: 60, wallClockDuration: 6.0))
-        #expect(!H264PassthroughRecorder.isUnderDelivered(framesAppended: 10, frameRate: 60, wallClockDuration: 0))
-        #expect(!H264PassthroughRecorder.isUnderDelivered(framesAppended: 10, frameRate: 0, wallClockDuration: 6.0))
-    }
-
     // MARK: - Real mux round-trip
 
     private func loadFixtureAccessUnits(
@@ -107,31 +79,6 @@ struct H264PassthroughRecorderTests {
         #expect(Int(dimensions.height) == 120)
         let duration = try await asset.load(.duration)
         #expect(duration.seconds > 0.8)
-    }
-
-    @Test("Constant-rate mode lays frames out at exactly 1/fps")
-    func constantRatePTS() async throws {
-        let fixture = try loadFixtureAccessUnits()
-        let outputURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("simuse-cfr-\(UUID().uuidString).mp4")
-        defer { try? FileManager.default.removeItem(at: outputURL) }
-
-        let recorder = try H264PassthroughRecorder(outputURL: outputURL, frameRate: 30)
-        // Deliberately jittery host times — CFR mode must ignore them.
-        var hostTime = 0.0
-        for (index, unit) in fixture.units.enumerated() {
-            try recorder.append(accessUnit: unit, sps: fixture.sps, pps: fixture.pps, hostTime: hostTime)
-            hostTime += (index % 2 == 0) ? 0.005 : 0.4
-        }
-        try await recorder.finish(stopHostTime: hostTime)
-
-        let asset = AVURLAsset(url: outputURL)
-        let track = try #require(try await asset.loadTracks(withMediaType: .video).first)
-        let nominal = try await track.load(.nominalFrameRate)
-        #expect(abs(nominal - 30) < 1.0, "expected ~30 fps constant rate, got \(nominal)")
-        let duration = try await asset.load(.duration)
-        // 10 frames at 30 fps → ~0.33 s regardless of the jittery host clock.
-        #expect(abs(duration.seconds - 10.0 / 30.0) < 0.05, "expected ~0.33 s, got \(duration.seconds)")
     }
 
     @Test("finish with zero frames throws and leaves no file behind")
