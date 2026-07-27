@@ -24,17 +24,24 @@ struct ViewerAPIHandlersTests {
     /// Writes an executable `/bin/sh` script that prints the given
     /// stdout/stderr and exits with `exitCode`, then returns handlers
     /// pointed at it. The script lives in a per-test temp directory
-    /// cleaned up by the returned closure.
+    /// cleaned up by the returned closure. With `recordArgs`, the
+    /// script first writes the argv it was spawned with to
+    /// `<script>.args` (see `recordedArgs(of:)`) so tests can assert
+    /// on the exact command line the handler built.
     private func makeHandlers(
         stdout: String,
         stderr: String = "",
-        exitCode: Int32
+        exitCode: Int32,
+        recordArgs: Bool = false
     ) throws -> (handlers: ViewerAPIHandlers, cleanup: () -> Void) {
         let suffix = String(UUID().uuidString.prefix(6))
         let dir = URL(fileURLWithPath: "/tmp/sim-use-viewer-\(suffix)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let script = dir.appendingPathComponent("fake-sim-use")
         var lines = ["#!/bin/sh"]
+        if recordArgs {
+            lines.append("echo \"$@\" > \"$0.args\"")
+        }
         // Heredocs keep the JSON fixtures verbatim — no shell quoting
         // pitfalls around the double quotes inside the envelopes.
         if !stdout.isEmpty {
@@ -57,6 +64,15 @@ struct ViewerAPIHandlersTests {
             ViewerAPIHandlers(executable: script),
             { try? FileManager.default.removeItem(at: dir) }
         )
+    }
+
+    /// The argv recorded by a `makeHandlers(recordArgs: true)` script,
+    /// whitespace-trimmed.
+    private func recordedArgs(of handlers: ViewerAPIHandlers) throws -> String {
+        try String(
+            contentsOf: URL(fileURLWithPath: handlers.executable.path + ".args"),
+            encoding: .utf8
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func getRequest(query: [String: String] = [:]) -> HTTPRequest {
@@ -198,23 +214,13 @@ struct ViewerAPIHandlersTests {
         let envelope = """
         {"ok":true,"data":{"platform":"ios","outline":"App: SampleApp  402x874\\n","entries":[],"lists":[]}}
         """
-        let (handlers, cleanup) = try makeHandlers(stdout: envelope, exitCode: 0)
+        let (handlers, cleanup) = try makeHandlers(stdout: envelope, exitCode: 0, recordArgs: true)
         defer { cleanup() }
-        // Extend the fake binary to record its argv before replaying
-        // the scripted stdout — the recording is what this test is for.
-        let script = handlers.executable
-        let argsFile = script.deletingLastPathComponent().appendingPathComponent("args.txt")
-        let original = try String(contentsOf: script, encoding: .utf8)
-        try Data(("#!/bin/sh\necho \"$@\" > '\(argsFile.path)'\n"
-            + original.replacingOccurrences(of: "#!/bin/sh\n", with: "")).utf8)
-            .write(to: script)
 
         let response = await handlers.snapshot(getRequest(query: ["deviceId": "TEST-UDID"]))
 
         #expect(response.status == 200)
-        let argv = try String(contentsOf: argsFile, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        #expect(argv == "describe-ui --device TEST-UDID --json --no-raw")
+        #expect(try recordedArgs(of: handlers) == "describe-ui --device TEST-UDID --json --no-raw")
     }
 
     @Test("snapshot: rotated iOS outline still carries screen dimensions")

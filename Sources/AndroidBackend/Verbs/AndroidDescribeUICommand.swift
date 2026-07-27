@@ -13,7 +13,7 @@ public struct AndroidDescribeUICommand: SimUseExecutableCommand {
 
     @OptionGroup public var device: AndroidDeviceOptions
 
-    @Flag(name: .customLong("json"), help: "Emit the unified `{ok, data: DescribeUIResult}` envelope (compact, sortedKeys). Includes the raw bridge tree under `data.raw`.")
+    @Flag(name: .customLong("json"), help: "Emit the unified `{ok, data: DescribeUIResult}` envelope (compact, sortedKeys). Includes the raw bridge tree under `data.raw` unless --no-raw is passed.")
     public var jsonOutput: Bool = false
 
     @Flag(
