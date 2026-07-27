@@ -68,7 +68,7 @@ struct H264PassthroughRecorderTests {
         }
         try await recorder.finish(stopHostTime: hostTime)
 
-        #expect(recorder.framesAppended == 10)
+        #expect(recorder.framesAppended == Int64(fixture.units.count + 1))
 
         let asset = AVURLAsset(url: outputURL)
         let tracks = try await asset.loadTracks(withMediaType: .video)
@@ -79,6 +79,22 @@ struct H264PassthroughRecorderTests {
         #expect(Int(dimensions.height) == 120)
         let duration = try await asset.load(.duration)
         #expect(duration.seconds > 0.8)
+    }
+
+    @Test("finish holds the final frame through the requested stop time")
+    func finishExtendsFinalFrame() async throws {
+        let fixture = try loadFixtureAccessUnits()
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("simuse-mux-final-frame-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        let recorder = try H264PassthroughRecorder(outputURL: outputURL)
+        try recorder.append(accessUnit: fixture.units[0], sps: fixture.sps, pps: fixture.pps, hostTime: 100)
+        try await recorder.finish(stopHostTime: 106)
+
+        #expect(recorder.framesAppended == 2)
+        let duration = try await AVURLAsset(url: outputURL).load(.duration)
+        #expect(duration.seconds > 5.9)
     }
 
     @Test("finish with zero frames throws and leaves no file behind")

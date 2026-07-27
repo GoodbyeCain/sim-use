@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Android `record-video` now preserves a static final frame through the requested stop time, and waits for stdout chunks already being delivered before finalizing the MP4.
 - `record-video` frame rate is no longer capped at the ~8–10 fps the screenshot-polling loop topped out at (iOS honors `--fps` up to 60 with smooth constant-rate playback; an Android emulator captured ~50 fps under motion). Recording no longer burns CPU decoding/re-encoding every frame.
 - Building the XCFrameworks now requires [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`) — the idb checkout generates `FBSimulatorControl.xcodeproj` from `project.yml`. The frameworks are built without library evolution, so `build_products/` is locked to the toolchain that produced it: re-run `./scripts/build.sh dev` after switching Xcode versions (CI keys its cache on the Xcode version for the same reason).
 

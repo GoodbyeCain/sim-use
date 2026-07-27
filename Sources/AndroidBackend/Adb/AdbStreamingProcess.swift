@@ -20,6 +20,8 @@ public final class AdbStreamingProcess: Sendable {
         let stderrPipe = Pipe()
         var stdoutByteCount: Int64 = 0
         var stderrBuffer = Data()
+        var stdoutClosing = false
+        var activeStdoutDeliveries = 0
     }
 
     private let adbPath: String
@@ -28,6 +30,7 @@ public final class AdbStreamingProcess: Sendable {
     private let onStderr: (@Sendable (String) -> Void)?
     private let state = OSAllocatedUnfairLock(initialState: State())
     private let exitSemaphore = DispatchSemaphore(value: 0)
+    private let stdoutDrainedSemaphore = DispatchSemaphore(value: 0)
 
     public init(
         adbPath: String,
@@ -50,8 +53,10 @@ public final class AdbStreamingProcess: Sendable {
             state.process.standardError = state.stderrPipe
 
             state.stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+                guard let self, self.beginStdoutDelivery() else { return }
+                defer { self.endStdoutDelivery() }
                 let chunk = handle.availableData
-                guard let self, !chunk.isEmpty else { return }
+                guard !chunk.isEmpty else { return }
                 self.state.withLock { $0.stdoutByteCount += Int64(chunk.count) }
                 self.onStdout(chunk)
             }
@@ -110,9 +115,17 @@ public final class AdbStreamingProcess: Sendable {
             _ = exitSemaphore.wait(timeout: .now() + 0.5)
         }
 
-        let (residualOut, status): (Data, Int32) = state.withLock { state in
+        let waitForStdoutDeliveries = state.withLock { state in
+            state.stdoutClosing = true
             state.stdoutPipe.fileHandleForReading.readabilityHandler = nil
             state.stderrPipe.fileHandleForReading.readabilityHandler = nil
+            return state.activeStdoutDeliveries > 0
+        }
+        if waitForStdoutDeliveries {
+            stdoutDrainedSemaphore.wait()
+        }
+
+        let (residualOut, status): (Data, Int32) = state.withLock { state in
             let residual = state.stdoutPipe.fileHandleForReading.readDataToEndOfFile()
             let residualErr = state.stderrPipe.fileHandleForReading.readDataToEndOfFile()
             state.stdoutByteCount += Int64(residual.count)
@@ -127,5 +140,23 @@ public final class AdbStreamingProcess: Sendable {
         }
 
         return timedOut ? nil : status
+    }
+
+    private func beginStdoutDelivery() -> Bool {
+        state.withLock { state in
+            guard !state.stdoutClosing else { return false }
+            state.activeStdoutDeliveries += 1
+            return true
+        }
+    }
+
+    private func endStdoutDelivery() {
+        let shouldSignal = state.withLock { state in
+            state.activeStdoutDeliveries -= 1
+            return state.stdoutClosing && state.activeStdoutDeliveries == 0
+        }
+        if shouldSignal {
+            stdoutDrainedSemaphore.signal()
+        }
     }
 }

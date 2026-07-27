@@ -47,6 +47,7 @@ public final class H264PassthroughRecorder: Sendable {
         var formatDimensions: CMVideoDimensions?
         var firstHostTime: TimeInterval?
         var lastPTS: CMTime = .invalid
+        var lastAccessUnit: H264AccessUnit?
         var framesAppended: Int64 = 0
     }
 
@@ -67,32 +68,18 @@ public final class H264PassthroughRecorder: Sendable {
     public func append(accessUnit: H264AccessUnit, sps: Data, pps: Data, hostTime: TimeInterval) throws {
         try state.withLock { state in
             try ensureStarted(&state, sps: sps, pps: pps, hostTime: hostTime)
-            guard let input = state.input, let formatDescription = state.formatDescription, let firstHostTime = state.firstHostTime else {
+            guard let firstHostTime = state.firstHostTime else {
                 throw H264PassthroughError.appendFailed("writer not initialized")
             }
-
-            try H264StreamRecorder.waitUntilReady(
-                isReady: { input.isReadyForMoreMediaData },
-                timeout: H264StreamRecorder.readinessTimeout
-            )
-
             let pts = Self.normalizedPTS(hostTime: hostTime, firstHostTime: firstHostTime, lastPTS: state.lastPTS)
-            let sampleBuffer = try Self.makeSampleBuffer(
-                avcc: Self.avccData(for: accessUnit),
-                formatDescription: formatDescription,
-                pts: pts,
-                isIDR: accessUnit.isIDR
-            )
-            guard input.append(sampleBuffer) else {
-                throw H264PassthroughError.appendFailed(state.writer.error?.localizedDescription ?? "unknown writer error")
-            }
-            state.lastPTS = pts
-            state.framesAppended += 1
+            try appendSampleLocked(&state, accessUnit: accessUnit, pts: pts)
         }
     }
 
-    /// Finalize the MP4. `stopHostTime` sets the session end so the final
-    /// (variable-rate) frame is held for its true wall-clock duration.
+    /// Finalize the MP4. When the source goes quiet, `AVAssetWriter` does not
+    /// extend a sample with an invalid duration merely because the session
+    /// ends later. Re-appending the last access unit at `stopHostTime` keeps
+    /// the final image visible through the true wall-clock recording duration.
     /// Throws `.noFramesCaptured` — after deleting the empty output — when
     /// no frame was ever appended.
     public func finish(stopHostTime: TimeInterval?) async throws {
@@ -103,12 +90,25 @@ public final class H264PassthroughRecorder: Sendable {
             throw H264PassthroughError.noFramesCaptured
         }
 
+        if let stopHostTime {
+            try state.withLock { state in
+                guard let firstHostTime = state.firstHostTime else {
+                    throw H264PassthroughError.appendFailed("writer not initialized")
+                }
+                let endPTS = Self.normalizedPTS(
+                    hostTime: stopHostTime,
+                    firstHostTime: firstHostTime,
+                    lastPTS: state.lastPTS
+                )
+                if let lastAccessUnit = state.lastAccessUnit {
+                    try appendSampleLocked(&state, accessUnit: lastAccessUnit, pts: endPTS)
+                }
+                state.writer.endSession(atSourceTime: endPTS)
+            }
+        }
+
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             state.withLock { state in
-                if let stopHostTime, let firstHostTime = state.firstHostTime {
-                    let endPTS = Self.normalizedPTS(hostTime: stopHostTime, firstHostTime: firstHostTime, lastPTS: state.lastPTS)
-                    state.writer.endSession(atSourceTime: endPTS)
-                }
                 state.input?.markAsFinished()
                 state.writer.finishWriting {
                     let error = self.state.withLock { $0.writer.error }
@@ -132,6 +132,28 @@ public final class H264PassthroughRecorder: Sendable {
     }
 
     // MARK: - Startup / segment handling
+
+    private func appendSampleLocked(_ state: inout State, accessUnit: H264AccessUnit, pts: CMTime) throws {
+        guard let input = state.input, let formatDescription = state.formatDescription else {
+            throw H264PassthroughError.appendFailed("writer not initialized")
+        }
+        try H264StreamRecorder.waitUntilReady(
+            isReady: { input.isReadyForMoreMediaData },
+            timeout: H264StreamRecorder.readinessTimeout
+        )
+        let sampleBuffer = try Self.makeSampleBuffer(
+            avcc: Self.avccData(for: accessUnit),
+            formatDescription: formatDescription,
+            pts: pts,
+            isIDR: accessUnit.isIDR
+        )
+        guard input.append(sampleBuffer) else {
+            throw H264PassthroughError.appendFailed(state.writer.error?.localizedDescription ?? "unknown writer error")
+        }
+        state.lastPTS = pts
+        state.lastAccessUnit = accessUnit
+        state.framesAppended += 1
+    }
 
     private func ensureStarted(_ state: inout State, sps: Data, pps: Data, hostTime: TimeInterval) throws {
         guard state.input == nil else {
