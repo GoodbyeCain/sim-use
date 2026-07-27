@@ -72,6 +72,106 @@ struct HIDSendDeadlineTests {
         #expect(await cancelled.wasMarked())
     }
 
+    @Test("The timeout fires even when the operation ignores cancellation", .timeLimit(.minutes(1)))
+    func timeoutFiresWhenOperationIgnoresCancellation() async {
+        // Faithful stand-in for the upstream send paths
+        // (FBSimulatorIndigoHIDClient.send / FBSimulatorDTUHIDTransport
+        // .send): the continuation is parked — retained but unresumed,
+        // observing no cancellation — the way a dead port's pending
+        // completion callback holds it. A task-group deadline waits
+        // behind this zombie forever; the unstructured race must
+        // abandon it and still deliver the timeout error.
+        let gate = ContinuationGate()
+        let zombie = ZombieTracker()
+        await #expect(throws: TimeoutMarker.self) {
+            try await HIDSendDeadline.run(milliseconds: 100) { () -> Int in
+                let value = try await withCheckedThrowingContinuation { continuation in
+                    gate.park(continuation)
+                }
+                await zombie.markFinished()
+                return value
+            } onTimeout: {
+                TimeoutMarker()
+            }
+        }
+        // Deterministic teardown: release the parked continuation and
+        // wait for the abandoned task to run out, so the test leaves no
+        // suspended task behind and no unresumed CheckedContinuation to
+        // log a "leaked its continuation" runtime diagnostic.
+        gate.release(returning: 0)
+        await zombie.waitUntilFinished()
+    }
+
+    @Test("Outer cancellation is not blocked by a cancellation-deaf operation", .timeLimit(.minutes(1)))
+    func outerCancellationResumesPromptly() async {
+        let gate = ContinuationGate()
+        let zombie = ZombieTracker()
+        let caller = Task { () -> Bool in
+            do {
+                _ = try await HIDSendDeadline.run(milliseconds: 60_000) { () -> Int in
+                    let value = try await withCheckedThrowingContinuation { continuation in
+                        gate.park(continuation)
+                    }
+                    await zombie.markFinished()
+                    return value
+                } onTimeout: {
+                    TimeoutMarker()
+                }
+                return false
+            } catch {
+                return error is CancellationError
+            }
+        }
+        // Let the race start, then cancel the caller — it must resume
+        // with CancellationError long before the 60 s deadline.
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        caller.cancel()
+        #expect(await caller.value)
+        // Same deterministic teardown as above.
+        gate.release(returning: 0)
+        await zombie.waitUntilFinished()
+    }
+
+    /// Parks a continuation the way a dead port's pending completion
+    /// callback would: retained, unresumed, deaf to cancellation —
+    /// until the test releases it explicitly.
+    private final class ContinuationGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var parked: CheckedContinuation<Int, Error>?
+
+        func park(_ continuation: CheckedContinuation<Int, Error>) {
+            lock.lock()
+            parked = continuation
+            lock.unlock()
+        }
+
+        func release(returning value: Int) {
+            lock.lock()
+            let continuation = parked
+            parked = nil
+            lock.unlock()
+            continuation?.resume(returning: value)
+        }
+    }
+
+    /// Lets the test await the abandoned task's completion after the
+    /// gate opens (the race itself exposes no handle to it, by design).
+    private actor ZombieTracker {
+        private var finished = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func markFinished() {
+            finished = true
+            for waiter in waiters { waiter.resume() }
+            waiters.removeAll()
+        }
+
+        func waitUntilFinished() async {
+            if finished { return }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+    }
+
     @Test("The production timeout message classifies as invalidateOnly")
     func timeoutMessageIsNotClassifiedAsDeadTransport() {
         // A timed-out composite may have delivered some sub-events, so

@@ -31,7 +31,7 @@ sim-use ui --device <UDID>
 
 Read the outline. Each element has an `@N` alias and optionally a `#<id>` identifier. List cells carry `#N` (dominant list) or `#N@M` (scoped).
 
-Frames in the JSON output (`--json`: `entries[].frame`, `screen`) are in platform-native units — iOS **points**, Android **pixels**. Key off the envelope's `platform` field before doing math on coordinates across platforms.
+Frames in the JSON output (`--json`: `entries[].frame`, `screen`) are in platform-native units — iOS **points**, Android **pixels**. Key off the envelope's `platform` field before doing math on coordinates across platforms. Always pair `--json` with `--no-raw` — see *Keeping output small* below.
 
 ### Act
 
@@ -56,6 +56,17 @@ Always verify after acting — commands are fire-and-forget:
 sim-use ui --device <UDID>       # read the new screen state
 sim-use screenshot --device <UDID> --output after.png
 ```
+
+### Keeping output small
+
+Every byte of command output you read costs context. Defaults that keep the loop cheap:
+
+- Prefer the default text outline over `--json`. The outline carries everything a tap needs (`@N` / `#<id>` aliases, roles, frames, states); reach for `--json` when you need structured fields for coordinate math (`entries[].frame`, `screen`) or full untruncated text (the outline truncates labels at 60 graphemes, `value=` at 30).
+- When you do use `--json`, add `--no-raw`. `data.raw` is the raw accessibility tree — typically the bulk of the envelope's bytes, and useful only for debugging sim-use itself.
+- One `ui` per action: the Verify read of step N is the Observe read of step N+1. Don't run a second `ui` in between.
+- Verify with the text outline, not a screenshot. Reading a screenshot costs several times more than a typical outline; take one only when the check is genuinely visual (colors, images, layout).
+- On iOS, to wait out a transition, prefer `tap --label 'X' --wait-timeout 3` (polls for the element) over re-running `ui` in a loop. Android `tap` has no `--wait-timeout`; use `sleep` between commands instead.
+- For a known multi-step sequence on iOS, use `sim-use ios batch` (see `references/batch-reference.md`) — one invocation, one output.
 
 ### Common moves
 
@@ -88,7 +99,6 @@ Quick symptom index — see `references/pitfalls.md` for detailed recipes.
 | Outline shows `U+FFFC` in label | iOS icon placeholder character | Match with `--label-regex` excluding the prefix |
 | `[i] … covers ~N% of the screen` warning (text output, or `--json` top-level `advisory` key) | The selector resolved to a near-full-screen wrapper (common on Flutter/canvas UIs) and the tap hit its center, likely missing the intended control | Re-run `ui` and target the control via `@N`/`#<id>`, or pass explicit `-x/-y`/`--point` |
 | `[i] Screen orientation could not be confirmed…` / `…coordinates may be stale…` advisory | Device/app is rotated (the `App:` header shows a tag like `(landscape-right)`) and orientation self-calibration couldn't verify the mapping, or the `@N` snapshot predates a rotation | Re-run `ui` and tap again; selectors handle rotation automatically once calibration succeeds. Explicit `-x/-y`/`--point` is always device-native portrait space |
-| iOS + Xcode 27: any HID verb (`tap`, `type`, `swipe`, …) errors with "Legacy HID input is disconnected … booted while Device Hub was open" | The simulator was **booted while Device Hub was open** — the legacy HID input path is disconnected at boot; sim-use detects this and refuses to send into the void | Quit Device Hub, then `xcrun simctl shutdown <UDID> && xcrun simctl boot <UDID>`; view simulators via the classic Simulator.app (from an Xcode 26.x install), which is safe. Device Hub attached *after* a clean boot is harmless and is not flagged |
 
 ## 3. Crash awareness
 
