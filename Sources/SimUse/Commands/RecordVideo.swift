@@ -203,9 +203,15 @@ struct RecordVideo: SimUseExecutableCommand {
         }
 
         let sdk = Self.detectSDK(adb: adb, serial: serial)
-        let size = scale < 1.0 ? Self.detectScaledSize(adb: adb, serial: serial, scale: scale) : nil
-        let bitrate = size.map { H264StreamRecorder.estimateBitrate(width: $0.width, height: $0.height, fps: 30, quality: quality) }
-        let arguments = Self.screenrecordArguments(serial: serial, sdk: sdk, bitrate: bitrate, size: size)
+        // Detect the display size unconditionally so --quality maps to a
+        // bitrate even at the default scale — only the --size *argument* is
+        // scale-gated below. If `wm size` is unparseable, bitrate is omitted
+        // (screenrecord's own 20 Mbps default) rather than failing the recording.
+        let baseSize = Self.detectSize(adb: adb, serial: serial)
+        let recordingSize = scale < 1.0 ? baseSize.map { Self.scaledSize($0, scale: scale) } : nil
+        let bitrateSize = recordingSize ?? baseSize
+        let bitrate = bitrateSize.map { H264StreamRecorder.estimateBitrate(width: $0.width, height: $0.height, fps: 30, quality: quality) }
+        let arguments = Self.screenrecordArguments(serial: serial, sdk: sdk, bitrate: bitrate, size: recordingSize)
 
         let recorder = try H264PassthroughRecorder(outputURL: outputURL)
         var recorderFinalized = false
@@ -291,13 +297,18 @@ struct RecordVideo: SimUseExecutableCommand {
         return Int(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 30
     }
 
-    private static func detectScaledSize(adb: Adb, serial: String, scale: Double) -> (width: Int, height: Int)? {
-        guard let result = try? adb.shell(serial: serial, args: ["wm", "size"]),
-              let base = parseWMSize(result.stdout) else {
+    private static func detectSize(adb: Adb, serial: String) -> (width: Int, height: Int)? {
+        guard let result = try? adb.shell(serial: serial, args: ["wm", "size"]) else {
             return nil
         }
-        let width = max(2, Int(Double(base.width) * scale))
-        let height = max(2, Int(Double(base.height) * scale))
+        return parseWMSize(result.stdout)
+    }
+
+    /// Scale a detected display size, rounding down to even dimensions
+    /// (required by most H.264 encoders).
+    static func scaledSize(_ size: (width: Int, height: Int), scale: Double) -> (width: Int, height: Int) {
+        let width = max(2, Int(Double(size.width) * scale))
+        let height = max(2, Int(Double(size.height) * scale))
         return (width - (width % 2), height - (height % 2))
     }
 

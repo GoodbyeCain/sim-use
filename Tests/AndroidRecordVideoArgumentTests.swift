@@ -49,4 +49,31 @@ struct AndroidRecordVideoArgumentTests {
             "-",
         ])
     }
+
+    // Regression: --quality must map to --bit-rate at the default scale too.
+    // `recordVideoAndroidStream` derives bitrate from `bitrateSize` (which
+    // falls back to the unscaled detected size when scale == 1.0), then
+    // always passes it to screenrecordArguments — only the --size argument
+    // itself is scale-gated.
+    @Test("screenrecordArguments passes --bit-rate without --size (default scale)")
+    func bitrateWithoutSizeAtDefaultScale() {
+        let args = RecordVideo.screenrecordArguments(serial: "emu-1", sdk: 34, bitrate: 4_000_000, size: nil)
+        #expect(args.contains("--bit-rate"))
+        #expect(args.contains("4000000"))
+        #expect(!args.contains("--size"))
+    }
+
+    @Test("scaledSize halves dimensions and rounds down to even")
+    func scaledSizeRounding() {
+        let scaled = RecordVideo.scaledSize((width: 1081, height: 2401), scale: 0.5)
+        #expect(scaled.width == 540)
+        #expect(scaled.height == 1200)
+    }
+
+    @Test("scaledSize at 1.0 returns the input unchanged (already even)")
+    func scaledSizeIdentity() {
+        let scaled = RecordVideo.scaledSize((width: 1080, height: 2400), scale: 1.0)
+        #expect(scaled.width == 1080)
+        #expect(scaled.height == 2400)
+    }
 }

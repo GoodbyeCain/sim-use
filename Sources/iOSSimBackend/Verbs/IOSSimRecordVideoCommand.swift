@@ -252,8 +252,12 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
 
         await stopStreamBestEffort(videoStream)
 
+        // The MP4 was already finalized above (moov written, valid file on
+        // disk) before this mid-stream error surfaced — say so, matching the
+        // Android branch's "partial recording saved" wording, so the caller
+        // doesn't discard a usable recording because the command exited non-zero.
         if let error = streamError.first {
-            throw error
+            throw CLIError(errorDescription: "\(error.localizedDescription); partial recording saved to \(outputURL.path)")
         }
     }
 
