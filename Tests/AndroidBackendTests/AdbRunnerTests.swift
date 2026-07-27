@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import XCTest
+import os
 @testable import AndroidBackend
 
 /// Integration-level tests for `Adb.run(args:)`. These spawn real
@@ -45,6 +46,52 @@ final class AdbRunnerTests: XCTestCase {
             "most of the 200 KB stderr payload must arrive — deadlock would yield 0"
         )
         XCTAssertEqual(result.exitCode, 0)
+    }
+
+    /// `waitForExit` must not finalize the consumer while a readability
+    /// callback has already taken bytes out of the pipe but not yet delivered
+    /// them. The blocked first callback reproduces the shutdown race that
+    /// previously lost the final H.264 chunk.
+    func testStreamingProcessDrainsInFlightStdoutBeforeReturning() throws {
+        let callbackStarted = DispatchSemaphore(value: 0)
+        let unblockFirstCallback = DispatchSemaphore(value: 0)
+        let waitReturned = DispatchSemaphore(value: 0)
+        let callbackCount = OSAllocatedUnfairLock(initialState: 0)
+        let received = OSAllocatedUnfairLock(initialState: Data())
+
+        let process = AdbStreamingProcess(
+            adbPath: "/bin/sh",
+            arguments: ["-c", "printf first; sleep 0.1; printf second"],
+            onStdout: { chunk in
+                let count = callbackCount.withLock { count in
+                    count += 1
+                    return count
+                }
+                if count == 1 {
+                    callbackStarted.signal()
+                    unblockFirstCallback.wait()
+                }
+                received.withLock { $0.append(chunk) }
+            }
+        )
+        try process.start()
+        XCTAssertEqual(callbackStarted.wait(timeout: .now() + 2), .success)
+
+        DispatchQueue.global().async {
+            _ = process.waitForExit(timeout: 2)
+            waitReturned.signal()
+        }
+
+        let returnedBeforeRelease = waitReturned.wait(timeout: .now() + 0.5) == .success
+        XCTAssertFalse(returnedBeforeRelease, "waitForExit must wait for the callback that already consumed stdout")
+        if returnedBeforeRelease {
+            unblockFirstCallback.signal()
+            return
+        }
+
+        unblockFirstCallback.signal()
+        XCTAssertEqual(waitReturned.wait(timeout: .now() + 2), .success)
+        XCTAssertEqual(String(data: received.withLock { $0 }, encoding: .utf8), "firstsecond")
     }
 
     /// Sanity check that a process exceeding the timeout still
