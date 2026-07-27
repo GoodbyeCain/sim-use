@@ -72,6 +72,49 @@ struct HIDSendDeadlineTests {
         #expect(await cancelled.wasMarked())
     }
 
+    @Test("The timeout fires even when the operation ignores cancellation", .timeLimit(.minutes(1)))
+    func timeoutFiresWhenOperationIgnoresCancellation() async {
+        // Faithful stand-in for the upstream send paths
+        // (FBSimulatorIndigoHIDClient.send / FBSimulatorDTUHIDTransport
+        // .send): a bare continuation with no cancellation handler that
+        // nothing ever resumes. A task-group deadline parks behind this
+        // zombie forever; the unstructured race must abandon it and
+        // still deliver the timeout error. The suspended task leaks —
+        // in production one per dead send, here one per test run.
+        await #expect(throws: TimeoutMarker.self) {
+            try await HIDSendDeadline.run(milliseconds: 100) { () -> Int in
+                try await withCheckedThrowingContinuation { (_: CheckedContinuation<Int, Error>) in
+                    // Never resumed, never observes cancellation.
+                }
+            } onTimeout: {
+                TimeoutMarker()
+            }
+        }
+    }
+
+    @Test("Outer cancellation is not blocked by a cancellation-deaf operation", .timeLimit(.minutes(1)))
+    func outerCancellationResumesPromptly() async {
+        let caller = Task { () -> Bool in
+            do {
+                _ = try await HIDSendDeadline.run(milliseconds: 60_000) { () -> Int in
+                    try await withCheckedThrowingContinuation { (_: CheckedContinuation<Int, Error>) in
+                        // Never resumed, never observes cancellation.
+                    }
+                } onTimeout: {
+                    TimeoutMarker()
+                }
+                return false
+            } catch {
+                return error is CancellationError
+            }
+        }
+        // Let the race start, then cancel the caller — it must resume
+        // with CancellationError long before the 60 s deadline.
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        caller.cancel()
+        #expect(await caller.value)
+    }
+
     @Test("The production timeout message classifies as invalidateOnly")
     func timeoutMessageIsNotClassifiedAsDeadTransport() {
         // A timed-out composite may have delivered some sub-events, so
