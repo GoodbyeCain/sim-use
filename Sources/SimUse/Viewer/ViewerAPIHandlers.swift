@@ -83,7 +83,16 @@ struct ViewerAPIHandlers {
             }
             let data = (envelope["data"] as? [String: Any]) ?? [:]
             let outline = data["outline"] as? String
-            let screen = parseScreenFromOutline(outline)
+            var screen = parseScreenFromOutline(outline)
+            // `describe-ui --json` carries the calibrated interface
+            // orientation whenever calibration ran (issue #38); forward
+            // it verbatim rather than parsing the `(landscape-right)`
+            // suffix back out of the outline header. Absent on Android
+            // and legacy daemons — the key is simply omitted then,
+            // matching the CLI envelope semantics.
+            if let orientation = data["orientation"] as? String {
+                screen?["orientation"] = orientation
+            }
             var payload: [String: Any] = [
                 "ok": true,
                 "capturedAt": iso8601Now(),

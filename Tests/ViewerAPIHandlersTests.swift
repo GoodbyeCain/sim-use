@@ -240,5 +240,28 @@ struct ViewerAPIHandlersTests {
         #expect(screen["appLabel"] as? String == "SampleApp")
         #expect(screen["width"] as? Int == 874)
         #expect(screen["height"] as? Int == 402)
+        // No `data.orientation` in the envelope → no `orientation`
+        // key in the screen payload (issue #57).
+        #expect(screen["orientation"] == nil)
+    }
+
+    @Test("snapshot: forwards data.orientation into the screen payload")
+    func snapshotForwardsOrientation() async throws {
+        let envelope = """
+        {"ok":true,"data":{"platform":"ios","orientation":"landscape-right","outline":"App: SampleApp  874x402  (landscape-right)\\n\\n[Top  y<120]\\n","entries":[],"lists":[]}}
+        """
+        let (handlers, cleanup) = try makeHandlers(stdout: envelope, exitCode: 0)
+        defer { cleanup() }
+
+        let response = await handlers.snapshot(getRequest(query: ["deviceId": "TEST-UDID"]))
+
+        #expect(response.status == 200)
+        let body = try jsonBody(response)
+        let screen = try #require(body["screen"] as? [String: Any])
+        #expect(screen["orientation"] as? String == "landscape-right")
+        // The rest of the screen payload is unaffected.
+        #expect(screen["appLabel"] as? String == "SampleApp")
+        #expect(screen["width"] as? Int == 874)
+        #expect(screen["height"] as? Int == 402)
     }
 }

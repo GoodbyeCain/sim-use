@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SIM_USE_HID_TRANSPORT=indigo|dtuhid` debug override to force a specific iOS HID transport (default: automatic per-boot selection). The per-UDID daemon keeps the environment it was spawned with — combine with `SIM_USE_NO_DAEMON=1` or restart the daemon for ad-hoc experiments.
 - `describe-ui --no-raw` (top-level, `ios describe-ui`, and `android describe-ui`): with `--json`, omit the raw accessibility tree from the envelope. `data.raw` typically dominates the payload on real app screens and is only useful for debugging sim-use itself; `outline` / `entries` / `lists` are unaffected.
 - *Keeping output small* section in `skills/sim-use/SKILL.md`: steers agents to prefer the text outline, pair `--json` with `--no-raw`, verify via outline instead of screenshots, reuse the verify read as the next observe, and batch known sequences.
+- Viewer: `GET /api/snapshot` now forwards the CLI's calibrated interface orientation as `screen.orientation` (omitted when `describe-ui` reports none — Android, legacy daemons), and the SPA tags a rotated screen next to the W×H readout, e.g. `874×402 (landscape-right)`. (#57)
 
 ### Changed
 
