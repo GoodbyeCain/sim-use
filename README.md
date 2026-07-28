@@ -126,9 +126,15 @@ it), **including Device Hub workflows**:
   Hub was open) is driven through dtuhidd's CoreDevice HID service, and
   everything else through the legacy SimulatorKit path. No reboot dance,
   no guard errors — `tap` / `type` / `swipe` work in both states.
+- A selection made within 15 s of boot (dtuhidd attaches 0–3 s after
+  boot, so a `simctl boot && sim-use type` script can probe too early)
+  is used once but not cached; the next command re-derives it, so an
+  early wrong pick never sticks for the boot.
 - `SIM_USE_HID_TRANSPORT=indigo|dtuhid` forces a specific transport for
-  debugging (combine with `SIM_USE_NO_DAEMON=1` — the per-UDID daemon
-  keeps the environment it was first spawned with).
+  debugging, and `SIM_USE_DEBUG=1` surfaces the transport-selection
+  signals (and other internal info-lines) on stderr / in the daemon
+  logfile (combine either with `SIM_USE_NO_DAEMON=1` — the per-UDID
+  daemon keeps the environment it was first spawned with).
 - Xcode 27 no longer bundles Simulator.app; the one from an Xcode 26.x
   install still works for viewing simulators, as does Device Hub itself.
 - Work record: `docs/ai/xxxx-xcode27-support/README.md`.
