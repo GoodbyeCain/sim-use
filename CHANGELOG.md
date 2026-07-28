@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `record-video --format gif` (top-level, `ios record-video`, and `android record-video`): record an animated GIF on both platforms. The format is also inferred from a `.gif` `--output` extension (explicit `--format` wins, with a stderr note on mismatch). Capture still runs through the existing H.264 pipelines into an intermediate MP4; on stop, the recording is transcoded into a looping GIF — sampled at `--fps` (GIF default 10) and scaled at `--scale` (GIF default 0.5), with per-frame delays derived from source timestamps so Android's variable frame rate keeps wall-clock pacing. A failed transcode preserves the intermediate MP4 and reports its path.
+
 ### Fixed
 
 - The `SIM_USE_VERSION` build-time override actually reaches the version stamp now. `VersionPlugin` registered its generator command with an empty environment, so the documented "environment variable first" priority was dead code and every build fell back to `git describe` — release builds happened to be correct only because they build on the tagged commit, while `scripts/dev-install.sh` builds stamped a stale describe string. The override is now resolved in the plugin process and baked into the command's argv, which also makes a changed override invalidate SPM's command cache without requiring a source-file edit.
