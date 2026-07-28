@@ -17,10 +17,23 @@ extension FBSimulator {
     /// The frontmost application's accessibility tree, in the same shape the
     /// pre-Swiftification `accessibilityElements(withNestedFormat:)` returned:
     /// an array of dictionaries (a single root for the nested format).
-    func legacyAccessibilityElements(nestedFormat: Bool) async throws -> AnyObject {
+    ///
+    /// `includeRemoteContent` opts into upstream's coverage-grid discovery
+    /// of elements owned by other processes (grid hit-testing over screen
+    /// regions the frontmost tree does not cover). Off by default: on a
+    /// healthy full-coverage tree it probes nothing, but on sparse (yet
+    /// perfectly valid) trees it burns a grid of hit-test XPCs — callers
+    /// enable it only when the plain fetch came back as an empty shell
+    /// (issue #64).
+    func legacyAccessibilityElements(nestedFormat: Bool, includeRemoteContent: Bool = false) async throws -> AnyObject {
         let element = try await accessibilityElementForFrontmostApplication()
         defer { element.close() }
-        let response = try element.serialize(with: FBAccessibilityRequestOptions(nestedFormat: nestedFormat))
+        var options = FBAccessibilityRequestOptions(nestedFormat: nestedFormat)
+        if includeRemoteContent {
+            options.collectFrameCoverage = true
+            options.remoteContentOptions = FBAccessibilityRemoteContentOptions()
+        }
+        let response = try element.serialize(with: options)
         return response.elements as AnyObject
     }
 

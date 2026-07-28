@@ -328,7 +328,7 @@ public enum OrientationCalibrator {
         return contained.count == 1 ? contained.first : nil
     }
 
-    static func frameRect(of node: [String: Any]) -> CGRect? {
+    nonisolated static func frameRect(of node: [String: Any]) -> CGRect? {
         guard let f = node["frame"] as? [String: Any] else { return nil }
         func number(_ v: Any?) -> Double? {
             if let d = v as? Double { return d }

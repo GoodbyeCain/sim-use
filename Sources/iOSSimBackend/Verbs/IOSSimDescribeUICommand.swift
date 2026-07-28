@@ -286,10 +286,13 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             appLabel: outline.appLabel,
             appPackage: appPackage,
             orientation: orientation?.rawValue,
-            // Degraded calibration (guessed orientation) must reach the
-            // caller: the outline may have lost regions to mis-mapped
-            // recovery probes and `orientation` is a guess, not a fact.
-            commandAdvisory: fetchResult.calibration?.advisory
+            // Degraded calibration (guessed orientation) and remote-content
+            // recovery (issue #64) must both reach the caller: the outline
+            // may be a guess-mapped or cross-process-recovered view rather
+            // than a plain frontmost tree.
+            commandAdvisory: CommandAdvisory.merged(
+                [fetchResult.advisory, fetchResult.calibration?.advisory].compactMap { $0 }
+            )
         )
     }
 

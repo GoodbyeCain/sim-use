@@ -339,6 +339,7 @@ run_tests() {
             "PasteTests"
             "PermissionAlertTests"
             "RecordVideoTests"
+            "RemoteContentRecoveryTests"
             "StreamVideoDebugTest"
             "StreamVideoTests"
             "SwipeTests"
