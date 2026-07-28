@@ -46,3 +46,27 @@ public enum GestureOrientationMapping {
         return (Double(start.x), Double(start.y), Double(end.x), Double(end.y))
     }
 }
+
+/// Shared calibration loader for standalone verbs whose coordinates
+/// run in ui space (directional gesture presets; `--coordinate-space
+/// ui` on swipe/touch). Degrades to an identity dispatch with an
+/// explicit advisory when the simulator cannot be calibrated at all —
+/// never silently.
+@MainActor
+public enum UISpaceCalibrationLoader {
+    public static func load(
+        udid: String,
+        fallbackMessage: String,
+        logger: SimUseLogger
+    ) async -> OrientationCalibration {
+        do {
+            return try await AccessibilityFetcher.fetchOrientationCalibration(for: udid, logger: logger)
+        } catch {
+            logger.info().log("Orientation calibration unavailable (\(error.localizedDescription)); dispatching in native portrait axes")
+            return .identity(advisory: CommandAdvisory(
+                kind: .orientationCalibrationFallback,
+                message: fallbackMessage
+            ))
+        }
+    }
+}
