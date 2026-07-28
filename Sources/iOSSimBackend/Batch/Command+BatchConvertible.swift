@@ -123,11 +123,37 @@ extension IOSSimSwipeCommand: BatchConvertible {
 
 extension IOSSimGestureCommand: BatchConvertible {
     public func toBatchPrimitives(context: BatchContext, logger: SimUseLogger) async throws -> [BatchPrimitive] {
-        let width = screenWidth ?? 390.0
-        let height = screenHeight ?? 844.0
-        let coords = preset.coordinates(screenWidth: width, screenHeight: height)
         let gestureDuration = duration ?? preset.defaultDuration
         let gestureDelta = delta ?? preset.defaultDelta
+
+        let coords: (startX: Double, startY: Double, endX: Double, endY: Double)
+        if preset.isMultiTouch {
+            // Multi-touch presets keep the legacy raw dispatch (see the
+            // standalone path for the scope rationale).
+            let width = screenWidth ?? GestureOrientationMapping.legacyWidth
+            let height = screenHeight ?? GestureOrientationMapping.legacyHeight
+            coords = preset.coordinates(screenWidth: width, screenHeight: height)
+        } else {
+            // Directional presets ride the batch-wide calibration
+            // (issue #66) — computed lazily once per run and shared
+            // with tap selector steps. An unreachable AX tree degrades
+            // to an identity dispatch with a recorded advisory instead
+            // of failing the whole batch.
+            let calibration: OrientationCalibration
+            if let roots = try? await context.accessibilityRoots(logger: logger) {
+                calibration = await context.orientationCalibration(roots: roots, logger: logger)
+            } else {
+                calibration = .identity()
+                context.recordAdvisory(CommandAdvisory(
+                    kind: .orientationCalibrationFallback,
+                    message: "Screen orientation could not be determined; '\(preset.rawValue)' was dispatched in device-native portrait axes and may point the wrong way if the device is rotated."
+                ))
+            }
+            let visual = GestureOrientationMapping.visualSize(
+                explicitWidth: screenWidth, explicitHeight: screenHeight, calibration: calibration)
+            let stroke = preset.strokes(screenWidth: visual.width, screenHeight: visual.height)[0]
+            coords = GestureOrientationMapping.hidStroke(stroke, calibration: calibration)
+        }
 
         let gestureEvent = FBSimulatorHIDEvent.swipe(
             coords.startX,

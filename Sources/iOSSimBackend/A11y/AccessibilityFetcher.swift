@@ -248,6 +248,33 @@ public struct AccessibilityFetcher {
         return FetchResult(data: data, calibration: finalCalibration)
     }
 
+    /// Orientation calibration WITHOUT the collapsed-children recovery
+    /// walk — for verbs that need the current orientation but not the
+    /// tree itself (directional gesture presets, issue #66). Costs one
+    /// tree-fetch XPC plus at most `OrientationCalibrator.defaultMaxProbes`
+    /// hit-test probes; recovery's quadtree probing (up to hundreds of
+    /// XPC round-trips on WebView-heavy screens) is skipped entirely.
+    public static func fetchOrientationCalibration(
+        for simulatorUDID: String,
+        logger: SimUseLogger
+    ) async throws -> OrientationCalibration {
+        let simulatorSet = try await getSimulatorSet(
+            deviceSetPath: nil,
+            logger: logger,
+            reporter: EmptyEventReporter.shared
+        )
+        guard let target = simulatorSet.allSimulators.first(where: { $0.udid == simulatorUDID }) else {
+            throw CLIError(errorDescription: "Simulator with UDID \(simulatorUDID) not found in set.")
+        }
+        let native = NativePortraitSize(screenInfo: target.screenInfo)
+        let probe: CollapsedChildrenRecovery.PointProbe = { point in
+            let raw: AnyObject = try await target.legacyAccessibilityElement(at: point, nestedFormat: false)
+            return raw as? [String: Any]
+        }
+        let info: AnyObject = try await target.legacyAccessibilityElements(nestedFormat: true)
+        return await calibrate(info: info, native: native, probe: probe, logger: logger)
+    }
+
     // MARK: - Calibration over the raw tree payload
 
     private static func calibrate(

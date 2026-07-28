@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- iOS directional gesture presets (`gesture scroll-up/down/left/right`, `swipe-from-*-edge`) are now orientation-aware (#66). They previously emitted device-native portrait axes, so on a rotated device `scroll-up` pointed 90° (landscape) or 180° (upside-down) away from its name — no scroll, or an unintended row navigation. Preset math now runs in the current visual space (auto-calibrated per command, the same #34 mapping `tap` selectors use) and the endpoints are transformed into HID coordinates; this covers both the standalone command and `ios batch` gesture steps (which share the batch-wide calibration). When the orientation cannot be determined the gesture falls back to the legacy portrait dispatch and says so via the `advisory` envelope key. Explicit `swipe`/`touch` coordinates remain device-native portrait by contract; pinch/rotate presets are likewise unchanged.
+
+### Changed
+
+- `gesture --screen-width/--screen-height` on iOS now describe a visual-space canvas and default to the auto-detected screen size of the current orientation (previously always 390×844, iPhone 15 portrait — wrong for iPads and every landscape state). The 390×844 fallback survives only when the screen size cannot be probed.
+
 ### Added
 
 - The agent-eval suite can now pin exactly which sim-use binary a run evaluates: `make eval ARGS="-b <path>"` / `scripts/eval.sh --sim-use <path>` / `run.py --sim-use <path>` (default remains whatever `sim-use` resolves to on PATH). The wrapper and runner print `sim-use under test: <real path> (<version>)` up front and the report header records it, so a run can never silently exercise the wrong binary — and development builds under `.build/` can be evaluated directly. New repo skill `.claude/skills/run-evals/` orchestrates the whole flow for agents and contributors: environment prep (Device Hub closed, fixtures installed), binary selection, cost confirmation, and verdict triage; `e2e/agent-evals/README.md` documents the new prereqs and flags.
