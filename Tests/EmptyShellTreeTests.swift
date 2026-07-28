@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 @testable import iOSSimBackend
+import FBControlCore
 import Foundation
 import Testing
 
@@ -125,5 +126,44 @@ struct RemoteContentSamplingRegionTests {
     @Test("Unknown native size yields nil (upstream default region)")
     func unknownNativeYieldsNil() {
         #expect(AccessibilityFetcher.remoteContentSamplingRegion(native: nil) == nil)
+    }
+}
+
+// The retry request must NOT enable the frame-coverage grid. The grid
+// is created and filled with UI-space frames while its isFilled gate
+// consumes the retry's framebuffer-space sample points — under rotation
+// a discovered element's UI frame shadows a numerically-overlapping but
+// visually unrelated framebuffer band, skipping later sample points.
+// And on the only path that runs discovery (an empty shell), the gate's
+// upside is zero anyway: the grid starts empty, so it can never save a
+// probe — it can only mis-skip one.
+
+@Suite("LegacyAccessibilityRequestBuilder")
+struct LegacyAccessibilityRequestBuilderTests {
+
+    @Test("A plain fetch requests neither discovery nor the coverage grid")
+    func plainFetchIsBare() {
+        let options = LegacyAccessibilityRequestBuilder.options(
+            nestedFormat: true, includeRemoteContent: false, remoteSamplingRegion: nil)
+        #expect(options.nestedFormat)
+        #expect(!options.collectFrameCoverage)
+        #expect(options.remoteContentOptions == nil)
+    }
+
+    @Test("The remote retry samples the given region without the coverage grid")
+    func retryHasRegionButNoGrid() {
+        let region = CGRect(x: 0, y: 0, width: 1032, height: 1376)
+        let options = LegacyAccessibilityRequestBuilder.options(
+            nestedFormat: true, includeRemoteContent: true, remoteSamplingRegion: region)
+        #expect(!options.collectFrameCoverage)
+        #expect(options.remoteContentOptions?.region == region)
+    }
+
+    @Test("A retry without a known region keeps upstream's default")
+    func retryWithoutRegionUsesUpstreamDefault() {
+        let options = LegacyAccessibilityRequestBuilder.options(
+            nestedFormat: true, includeRemoteContent: true, remoteSamplingRegion: nil)
+        #expect(!options.collectFrameCoverage)
+        #expect(options.remoteContentOptions?.region.isNull == true)
     }
 }

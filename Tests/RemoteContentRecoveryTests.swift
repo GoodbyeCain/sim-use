@@ -38,6 +38,23 @@ struct RemoteContentRecoveryTests {
         // builds and would serve the pre-fix fetch path; restart it so
         // this scene exercises the build under test.
         _ = try? await TestHelpers.runSimUseCommandAllowFailure("daemon stop --device \(udid)")
+
+        // The scene's second tap resolves against an action sheet whose
+        // symmetric, sparse layout gives orientation calibration nothing
+        // to discriminate with — on a rotated simulator an ambiguous
+        // guess can map the tap one row off (into the camera option).
+        // Require portrait up front so a leftover rotation fails loudly
+        // here instead of as a misleading assertion miss at the end.
+        let pre = try await TestHelpers.runSimUseCommand(
+            "describe-ui --json --no-raw", simulatorUDID: udid)
+        if let env = try? JSONSerialization.jsonObject(with: Data(pre.output.utf8)) as? [String: Any],
+           let data = env["data"] as? [String: Any],
+           let orientation = data["orientation"] as? String {
+            try #require(
+                orientation == "portrait",
+                "RemoteContentRecoveryTests requires a portrait simulator (found \(orientation)); rotate the Simulator back to portrait."
+            )
+        }
         let dir = try writeUploadPage()
         defer { try? FileManager.default.removeItem(at: dir) }
 

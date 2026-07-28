@@ -37,15 +37,11 @@ extension FBSimulator {
     ) async throws -> AnyObject {
         let element = try await accessibilityElementForFrontmostApplication()
         defer { element.close() }
-        var options = FBAccessibilityRequestOptions(nestedFormat: nestedFormat)
-        if includeRemoteContent {
-            options.collectFrameCoverage = true
-            var remote = FBAccessibilityRemoteContentOptions()
-            if let remoteSamplingRegion {
-                remote.region = remoteSamplingRegion
-            }
-            options.remoteContentOptions = remote
-        }
+        let options = LegacyAccessibilityRequestBuilder.options(
+            nestedFormat: nestedFormat,
+            includeRemoteContent: includeRemoteContent,
+            remoteSamplingRegion: remoteSamplingRegion
+        )
         let response = try element.serialize(with: options)
         return response.elements as AnyObject
     }
@@ -58,5 +54,38 @@ extension FBSimulator {
         defer { element.close() }
         let response = try element.serialize(with: FBAccessibilityRequestOptions(nestedFormat: nestedFormat))
         return response.elements as AnyObject
+    }
+}
+
+/// Options assembly for the legacy tree fetch, factored out so the
+/// remote-retry request contract stays unit-testable without a
+/// simulator.
+enum LegacyAccessibilityRequestBuilder {
+    static func options(
+        nestedFormat: Bool,
+        includeRemoteContent: Bool,
+        remoteSamplingRegion: CGRect?
+    ) -> FBAccessibilityRequestOptions {
+        var options = FBAccessibilityRequestOptions(nestedFormat: nestedFormat)
+        if includeRemoteContent {
+            // Deliberately WITHOUT collectFrameCoverage: the coverage grid
+            // is created and filled with UI-space frames while its
+            // isFilled gate consumes the discovery grid's
+            // framebuffer-space sample points — under rotation a
+            // discovered element's UI frame would shadow a numerically
+            // overlapping but visually unrelated framebuffer band,
+            // skipping later sample points. On the only path that runs
+            // discovery (an empty shell) the gate's upside is zero anyway:
+            // the grid starts empty, so it can never save a probe — it
+            // can only mis-skip one. Duplicate hits are already collapsed
+            // by upstream's frame-key dedup, which compares UI-space
+            // frames against UI-space frames.
+            var remote = FBAccessibilityRemoteContentOptions()
+            if let remoteSamplingRegion {
+                remote.region = remoteSamplingRegion
+            }
+            options.remoteContentOptions = remote
+        }
+        return options
     }
 }
