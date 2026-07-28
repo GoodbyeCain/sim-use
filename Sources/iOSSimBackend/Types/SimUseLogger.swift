@@ -7,23 +7,33 @@ public final class SimUseLogger: FBCompositeLogger {
         super.init(loggers: loggers)
     }
     
+    /// SIM_USE_DEBUG=1 forces stderr and debug-level output on every
+    /// logger regardless of what the call site asked for (OR-merged
+    /// below), so info-lines like the HID transport-selection signals
+    /// become visible in the field (issue #67) — including call sites
+    /// that pass their own flags, like `ios batch --verbose`. The
+    /// daemon redirects stderr to its logfile but keeps the
+    /// environment it was spawned with — combine with a daemon
+    /// restart or SIM_USE_NO_DAEMON=1.
+    static func debugEnvironmentEnabled(
+        _ environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        environment["SIM_USE_DEBUG"] == "1"
+    }
+
     public convenience init(debugLogging: Bool = false, writeToStdErr: Bool = true) {
+        let debug = Self.debugEnvironmentEnabled()
         let systemLogger = FBControlCoreLoggerFactory.systemLoggerWriting(
-            toStderr: writeToStdErr,
-            withDebugLogging: debugLogging
+            toStderr: writeToStdErr || debug,
+            withDebugLogging: debugLogging || debug
         )
         self.init(loggers: [systemLogger])
     }
-    
-    /// The default logger writes to no visible sink; SIM_USE_DEBUG=1
-    /// turns on stderr (which the daemon redirects to its logfile), so
-    /// info-lines like the HID transport-selection signals become
-    /// visible in the field (issue #67). The daemon keeps the
-    /// environment it was spawned with — combine with a daemon restart
-    /// or SIM_USE_NO_DAEMON=1.
+
+    /// The default logger writes to no visible sink unless
+    /// SIM_USE_DEBUG=1 turns one on (see `debugEnvironmentEnabled`).
     public override convenience init() {
-        let debug = ProcessInfo.processInfo.environment["SIM_USE_DEBUG"] == "1"
-        self.init(debugLogging: debug, writeToStdErr: debug)
+        self.init(debugLogging: false, writeToStdErr: false)
     }
     
     public func makeDefault() {
