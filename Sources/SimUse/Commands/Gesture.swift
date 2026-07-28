@@ -53,10 +53,10 @@ struct Gesture: SimUseExecutableCommand {
     @Argument(help: "The gesture preset to perform.")
     var preset: GesturePreset
 
-    @Option(name: .customLong("screen-width"), help: "Visual-space canvas width in points for the preset math (default: auto-detected; on iOS falls back to 390 when the screen size is unknown).")
+    @Option(name: .customLong("screen-width"), help: "Canvas width for the preset math. iOS single-finger presets: visual space, auto-detected by default (390 fallback); iOS pinch/rotate presets: device-native portrait, fixed 390 default. Android: real display pixels, auto-detected for all presets.")
     var screenWidth: Double?
 
-    @Option(name: .customLong("screen-height"), help: "Visual-space canvas height in points for the preset math (default: auto-detected; on iOS falls back to 844 when the screen size is unknown).")
+    @Option(name: .customLong("screen-height"), help: "Canvas height for the preset math. iOS single-finger presets: visual space, auto-detected by default (844 fallback); iOS pinch/rotate presets: device-native portrait, fixed 844 default. Android: real display pixels, auto-detected for all presets.")
     var screenHeight: Double?
 
     @Option(name: .customLong("duration"), help: "Duration of the gesture in seconds. Defaults to the preset baseline (0.3s edge / 0.5s scroll+pinch+rotate), except rotate presets auto-extend to |angle|/180s for sweeps > 90° so angular velocity stays near 180°/sec (recogniser sweet spot). Pass explicitly to override.")

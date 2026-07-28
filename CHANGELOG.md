@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `gesture --screen-width/--screen-height` on iOS now describe a visual-space canvas and default to the auto-detected screen size of the current orientation (previously always 390×844, iPhone 15 portrait — wrong for iPads and every landscape state). The 390×844 fallback survives only when the screen size cannot be probed.
+- `gesture --screen-width/--screen-height` on iOS: for **single-finger presets** they now describe a visual-space canvas and default to the auto-detected screen size of the current orientation (previously always 390×844, iPhone 15 portrait — wrong for iPads and every landscape state); 390×844 survives only when the screen size cannot be probed. **Pinch/rotate presets** keep the raw device-native portrait canvas with the fixed 390×844 default.
 
 ### Added
 
