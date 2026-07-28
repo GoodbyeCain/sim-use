@@ -265,6 +265,7 @@ struct BatchLoginFlowView: View {
                 TextField("Email", text: $email)
                     .textFieldStyle(.roundedBorder)
                     .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
                     .keyboardType(.emailAddress)
                     .focused($focusedField, equals: .email)
                     .accessibilityIdentifier("batch-login-email-field")
@@ -275,6 +276,10 @@ struct BatchLoginFlowView: View {
                     focusedField = .password
                 }
                 .buttonStyle(.borderedProminent)
+                // The system suggestion strip attaches ~41pt below the
+                // focused field and swallows taps on anything it covers;
+                // keep the button clear of that band (#76).
+                .padding(.top, 56)
                 .accessibilityIdentifier("batch-login-continue")
 
             case .password:
@@ -292,6 +297,7 @@ struct BatchLoginFlowView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .padding(.top, 56)
                 .accessibilityIdentifier("batch-login-sign-in")
 
             case .loading:

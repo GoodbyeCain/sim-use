@@ -85,9 +85,20 @@ struct CommandRunner {
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = ["-c", command]
 
-        if let environment {
-            process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+        // The E2E matrix runner pins `swift test` to the xcode-select
+        // toolchain (build_products/ is toolchain-locked) and passes the
+        // leg's Xcode via SIM_USE_TEST_DEVELOPER_DIR instead of
+        // DEVELOPER_DIR, which would retrigger a full rebuild. Inject it
+        // here so every spawned process — sim-use and `xcrun simctl`
+        // alike — resolves the leg's Xcode at runtime.
+        var childEnvironment = ProcessInfo.processInfo.environment
+        if let developerDir = childEnvironment["SIM_USE_TEST_DEVELOPER_DIR"], !developerDir.isEmpty {
+            childEnvironment["DEVELOPER_DIR"] = developerDir
         }
+        if let environment {
+            childEnvironment.merge(environment) { _, new in new }
+        }
+        process.environment = childEnvironment
 
         let outputPipe = Pipe()
         let errorPipe = Pipe()
