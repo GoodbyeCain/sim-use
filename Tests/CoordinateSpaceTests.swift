@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+@testable import AndroidBackend
 @testable import iOSSimBackend
 import Foundation
 import SimUseCore
@@ -179,5 +180,34 @@ struct BatchCoordinateSpaceTests {
                 ["touch", "-x", "100", "-y", "200", "--down", "--coordinate-space", "ui"],
                 context: context)
         }
+    }
+}
+
+// The top-level commands promise that --coordinate-space is accepted
+// everywhere and ignored on Android, and every Android direct command
+// mirrors its top-level/iOS flag surface — so `sim-use android
+// swipe/touch` must parse the flag too (as a no-op).
+
+@Suite("Android — coordinate-space parser parity")
+struct AndroidCoordinateSpaceParityTests {
+
+    @Test("android swipe parses --coordinate-space", arguments: ["native", "ui"])
+    func androidSwipeParsesFlag(value: String) throws {
+        let parsed = try AndroidSwipeCommand.parseAsRoot(
+            ["--from", "1,1", "--to", "2,2", "--coordinate-space", value]
+        ) as? AndroidSwipeCommand
+        let command = try #require(parsed)
+        #expect(command.coordinateSpace.rawValue == value)
+        let coords = try command.coordinates.resolve()
+        #expect(coords.startX == 1 && coords.endY == 2)
+    }
+
+    @Test("android touch parses --coordinate-space", arguments: ["native", "ui"])
+    func androidTouchParsesFlag(value: String) throws {
+        let parsed = try AndroidTouchCommand.parseAsRoot(
+            ["-x", "1", "-y", "1", "--down", "--up", "--coordinate-space", value]
+        ) as? AndroidTouchCommand
+        let command = try #require(parsed)
+        #expect(command.coordinateSpace.rawValue == value)
     }
 }
