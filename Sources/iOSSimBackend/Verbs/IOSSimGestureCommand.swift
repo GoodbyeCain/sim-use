@@ -46,10 +46,10 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
     @Argument(help: "The gesture preset to perform.")
     public var preset: GesturePreset
 
-    @Option(name: .customLong("screen-width"), help: "Visual-space canvas width in points for the preset math (default: auto-detected from the current orientation; 390 when the screen size is unknown).")
+    @Option(name: .customLong("screen-width"), help: "Canvas width in points for the preset math. Single-finger presets: visual space, auto-detected from the current orientation by default (390 when the screen size is unknown). Pinch/rotate presets: device-native portrait space, fixed 390 default.")
     public var screenWidth: Double?
 
-    @Option(name: .customLong("screen-height"), help: "Visual-space canvas height in points for the preset math (default: auto-detected from the current orientation; 844 when the screen size is unknown).")
+    @Option(name: .customLong("screen-height"), help: "Canvas height in points for the preset math. Single-finger presets: visual space, auto-detected from the current orientation by default (844 when the screen size is unknown). Pinch/rotate presets: device-native portrait space, fixed 844 default.")
     public var screenHeight: Double?
 
     @Option(name: .customLong("duration"), help: "Duration of the gesture in seconds (uses preset default if not specified).")
