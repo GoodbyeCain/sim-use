@@ -88,6 +88,57 @@ struct HIDBootIdentityReusableTests {
     }
 }
 
+// Upstream's HID transport auto-selection probes the simulator's
+// process tree for dtuhidd at `FBSimulatorHID` construction — but
+// dtuhidd attaches 0–3 s *after* boot on a simulator booted while
+// Device Hub is open (issue #67). A selection made inside that window
+// resolves to Indigo on a dtuhidd-suppressed simulator and, once
+// cached, silently pins the dead transport for the whole boot (Indigo
+// reports success without delivering, so recovery never fires).
+// `isTransportSelectionTrustworthy` gates the cache: a connection
+// built inside the window may be used once but must not be reused.
+
+@Suite("HIDBootIdentity.isTransportSelectionTrustworthy")
+struct HIDTransportTrustWindowTests {
+    private let now = Date(timeIntervalSince1970: 1_785_000_000)
+
+    private func token(uptime: TimeInterval?) -> HIDBootToken {
+        HIDBootToken(
+            launchdSim: uptime.map { LaunchdSimIdentity(pid: 74691, startedAt: now.addingTimeInterval(-$0)) },
+            markerModificationDate: nil
+        )
+    }
+
+    @Test("A selection made inside the boot-attach window is not trustworthy")
+    func insideWindowIsNotTrustworthy() {
+        // dtuhidd was measured attaching 0–3 s after launchd_sim; the
+        // window leaves margin over that. Anything probed before the
+        // boundary may have raced the attach.
+        #expect(!HIDBootIdentity.isTransportSelectionTrustworthy(token: token(uptime: 2), now: now))
+        #expect(!HIDBootIdentity.isTransportSelectionTrustworthy(token: token(uptime: 14.9), now: now))
+    }
+
+    @Test("A selection at or past the window boundary is trustworthy")
+    func atOrPastWindowIsTrustworthy() {
+        #expect(HIDBootIdentity.isTransportSelectionTrustworthy(
+            token: token(uptime: HIDBootIdentity.transportTrustWindow), now: now))
+        #expect(HIDBootIdentity.isTransportSelectionTrustworthy(token: token(uptime: 300), now: now))
+    }
+
+    @Test("Unknown launchd_sim identity keeps the marker-fallback caching behavior")
+    func unknownIdentityIsTrustworthy() {
+        // The race evidence only exists where the launchd_sim probe
+        // works; failing closed here would rebuild the connection on
+        // every command in environments where the probe never works.
+        #expect(HIDBootIdentity.isTransportSelectionTrustworthy(token: token(uptime: nil), now: now))
+    }
+
+    @Test("A start time in the future (clock anomaly) is not trustworthy")
+    func futureStartTimeIsNotTrustworthy() {
+        #expect(!HIDBootIdentity.isTransportSelectionTrustworthy(token: token(uptime: -30), now: now))
+    }
+}
+
 @Suite("HIDBootIdentity.token")
 struct HIDBootIdentityTokenTests {
 

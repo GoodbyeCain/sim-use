@@ -25,9 +25,14 @@ public struct HIDInteractor {
     // connection's mach port dies with that boot, and a send through a
     // dead port hangs or silently drops input (issue #55), so reuse
     // must be gated on the token before anything is sent.
+    // `transportTrusted` is false when the transport was auto-selected
+    // inside the boot-attach trust window (issue #67): the entry may
+    // serve the command that created it but must not be reused, so the
+    // next command re-derives the selection.
     private struct CachedConnection {
         let hid: FBSimulatorHID
         let bootToken: HIDBootToken
+        let transportTrusted: Bool
     }
 
     private static var hidConnections: [String: CachedConnection] = [:]
@@ -166,14 +171,23 @@ public struct HIDInteractor {
     private static func getOrCreateHIDConnection(for simulator: FBSimulator, logger: SimUseLogger) async throws -> FBSimulatorHID {
         let currentToken = HIDBootIdentity.token(dataDirectory: simulator.dataDirectory, udid: simulator.udid)
         if let cached = hidConnections[simulator.udid] {
-            if HIDBootIdentity.isReusable(cachedToken: cached.bootToken, currentToken: currentToken) {
+            let sameBoot = HIDBootIdentity.isReusable(cachedToken: cached.bootToken, currentToken: currentToken)
+            if sameBoot && cached.transportTrusted {
                 logger.info().log("Using existing HID connection for simulator \(simulator.udid)")
                 return cached.hid
             }
-            // The simulator was re-booted (or the boot identity is
-            // unknowable) since the connection was made: the cached
-            // handle's mach port is dead and must not be sent through.
-            logger.info().log("Boot identity changed for simulator \(simulator.udid) (cached: \(cached.bootToken); current: \(currentToken)); discarding cached HID connection")
+            if sameBoot {
+                // Same boot, but the transport was auto-selected inside
+                // the boot-attach trust window (issue #67): dtuhidd may
+                // have appeared since the probe, so the selection must
+                // be re-derived rather than pinned for the whole boot.
+                logger.info().log("Cached HID connection for \(simulator.udid) was created inside the transport trust window; discarding it to re-derive the transport selection")
+            } else {
+                // The simulator was re-booted (or the boot identity is
+                // unknowable) since the connection was made: the cached
+                // handle's mach port is dead and must not be sent through.
+                logger.info().log("Boot identity changed for simulator \(simulator.udid) (cached: \(cached.bootToken); current: \(currentToken)); discarding cached HID connection")
+            }
             cached.hid.disconnect()
             hidConnections.removeValue(forKey: simulator.udid)
         }
@@ -199,8 +213,17 @@ public struct HIDInteractor {
         // debug override is set.
         let hid = try FBSimulatorHID(for: simulator, transport: transportOverride)
 
-        hidConnections[simulator.udid] = CachedConnection(hid: hid, bootToken: currentToken)
-        logger.info().log("HID connection created and cached for simulator \(simulator.udid)")
+        // A forced transport cannot race dtuhidd's boot-time attach;
+        // only the auto-selection is window-gated.
+        let transportTrusted = transportOverride != nil
+            || HIDBootIdentity.isTransportSelectionTrustworthy(token: currentToken, now: Date())
+        hidConnections[simulator.udid] = CachedConnection(
+            hid: hid, bootToken: currentToken, transportTrusted: transportTrusted)
+        if transportTrusted {
+            logger.info().log("HID connection created and cached for simulator \(simulator.udid)")
+        } else {
+            logger.info().log("HID connection created for simulator \(simulator.udid) inside the transport trust window (launchd_sim uptime < \(Int(HIDBootIdentity.transportTrustWindow)) s); the next command re-derives the transport selection")
+        }
 
         return hid
     }

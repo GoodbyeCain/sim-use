@@ -63,6 +63,29 @@ enum HIDBootIdentity {
         }
     }
 
+    /// The window after boot inside which upstream's HID transport
+    /// auto-selection cannot be trusted: dtuhidd attaches 0–3 s after
+    /// `launchd_sim` on a simulator booted while Device Hub is open
+    /// (issue #67), so a selection probed before it appears resolves
+    /// to Indigo on a dtuhidd-suppressed simulator — and Indigo
+    /// reports success without delivering, so no recovery path ever
+    /// rebuilds it. 15 s matches the retired issue #60 guard's window
+    /// and leaves margin over the measured attach delay.
+    static let transportTrustWindow: TimeInterval = 15
+
+    /// Whether a transport selection made `now` may be pinned (cached)
+    /// for the rest of the boot. Inside the window the connection is
+    /// still usable — the caller just must not reuse it, so the next
+    /// command re-derives the selection after the window closes.
+    /// An unknown launchd_sim identity keeps the marker-fallback
+    /// caching behavior: the race evidence only exists where the
+    /// probe works, and failing closed would rebuild on every command
+    /// in environments where it never does.
+    static func isTransportSelectionTrustworthy(token: HIDBootToken, now: Date) -> Bool {
+        guard let launchdSim = token.launchdSim else { return true }
+        return now.timeIntervalSince(launchdSim.startedAt) >= transportTrustWindow
+    }
+
     /// The current boot token for a simulator. The probe is injectable
     /// so the composition is testable without live processes.
     static func token(
