@@ -74,7 +74,7 @@ interpreted in the device-native portrait space.
 ## Why sim-use
 
 - **Token-efficient.** The outline representation is ~16x more compact than a raw JSON accessibility tree. An LLM can read and reason about an entire screen in a few hundred tokens.
-- **Nothing hidden.** sim-use walks the full accessibility tree including WebViews, system overlays, and embedded content — no elements are silently skipped.
+- **Nothing hidden.** sim-use walks the full accessibility tree including WebViews, system overlays, and embedded content — no elements are silently skipped. When the frontmost app exposes an empty tree because a remote process owns the visible UI (a system document picker, for example), `ui` automatically retries with cross-process discovery and flags the recovered, flat hierarchy via the `advisory` envelope key.
 - **AI-native.** Designed from day one for agent loops, not human testers. Alias-cached taps (`@N`), structured `--json` envelopes with actionable `hint` fields on errors, and a bundled agent skill (`sim-use init --client claude`) that teaches your AI client the full command surface.
 - **Fast.** A per-device background daemon amortises init cost across calls. After the first command, each observe-act round trip completes in ~300 ms.
 - **Cross-platform.** One command surface drives both iOS Simulator and Android emulator/device. Same verbs, same flags, same `--json` shape — write one agent loop that works on both.

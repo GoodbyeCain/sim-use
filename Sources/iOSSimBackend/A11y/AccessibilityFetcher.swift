@@ -26,10 +26,19 @@ public struct AccessibilityFetcher {
     /// Tree (or point-query) payload plus the orientation calibration the
     /// fetch ran under. `calibration` is nil only for surfaces that never
     /// calibrated (legacy shims); a degraded calibration is still present
-    /// with its advisory attached.
+    /// with its advisory attached. `advisory` is non-nil when the tree came
+    /// back as an empty shell and the visible elements were recovered from
+    /// other processes via the remote-content retry (issue #64).
     public struct FetchResult {
         public let data: Data
         public let calibration: OrientationCalibration?
+        public let advisory: CommandAdvisory?
+
+        public init(data: Data, calibration: OrientationCalibration?, advisory: CommandAdvisory? = nil) {
+            self.data = data
+            self.calibration = calibration
+            self.advisory = advisory
+        }
     }
 
     public static func fetchAccessibilityInfoJSONData(
@@ -100,8 +109,33 @@ public struct AccessibilityFetcher {
             )
         }
 
-        let info: AnyObject = try await target.legacyAccessibilityElements(nestedFormat: true)
+        var info: AnyObject = try await target.legacyAccessibilityElements(nestedFormat: true)
         perf.stage("tree fetch XPC")
+
+        // Empty-shell retry (issue #64): a remote-process presentation
+        // (system document picker) leaves the frontmost tree a bare,
+        // frameless AXApplication. Refetch once with upstream's
+        // remote-content discovery so the visible cross-process elements
+        // materialize. The plain first fetch keeps the hot path untouched —
+        // healthy and sparse-but-valid trees never pay for the grid probes.
+        var remoteAdvisory: CommandAdvisory? = nil
+        if isEmptyShellTree(info) {
+            logger.info().log("Frontmost accessibility tree is an empty shell; retrying with remote-content discovery")
+            if let retried = try? await target.legacyAccessibilityElements(
+                    nestedFormat: true,
+                    includeRemoteContent: true,
+                    remoteSamplingRegion: remoteContentSamplingRegion(native: native)),
+               !isEmptyShellTree(retried) {
+                info = retried
+                remoteAdvisory = CommandAdvisory(
+                    kind: .remoteContentRecovery,
+                    message: "The frontmost app exposed an empty accessibility tree; visible elements were recovered from other processes (e.g. a system picker). The hierarchy is flat and may not cover every element — prefer visible labels over structure."
+                )
+            } else {
+                logger.info().log("Remote-content retry did not surface any elements; keeping the original tree")
+            }
+            perf.stage("remote-content retry")
+        }
 
         let calibration = await calibrate(info: info, native: native, probe: probe, logger: logger)
         perf.stage("calibrate")
@@ -127,7 +161,61 @@ public struct AccessibilityFetcher {
         let data = try serializeAccessibilityInfo(recovered)
         perf.stage("serialize")
         perf.finish()
-        return FetchResult(data: data, calibration: calibration)
+        return FetchResult(data: data, calibration: calibration, advisory: remoteAdvisory)
+    }
+
+    /// Whether a fetched tree payload is an "empty shell" warranting the
+    /// remote-content retry (issue #64): no non-application node anywhere
+    /// in it carries a positive-area frame. The frontmost app reports
+    /// exactly this while a remote process (system document picker) owns
+    /// the visible UI — observed live both as a bare `{pid, role}` root
+    /// (0.10.0-era reports) and as a full-screen-framed AXApplication
+    /// with zero children (current runtimes). The application container's
+    /// own frame is just the screen rectangle and proves nothing about
+    /// visible content, so it never vetoes the retry. Unrecognized shapes
+    /// and oversized trees are NOT shells: failing closed keeps the retry
+    /// (and its full-screen probe cost) off every path this predicate
+    /// doesn't positively understand.
+    /// The grid-sampling region for the remote-content retry: the native
+    /// portrait framebuffer bounds. Upstream's default region is the root
+    /// element's UI-space frame, but the grid points feed the point
+    /// hit-test, which consumes FRAMEBUFFER points (issue #34) — under
+    /// rotation a UI-space region samples the wrong band (points past the
+    /// native width hit nothing; a whole native band is never sampled).
+    /// A full native-portrait grid covers every visible pixel regardless
+    /// of orientation. Nil (unknown screen size) falls back to upstream's
+    /// default region: correct in portrait, best-effort elsewhere.
+    nonisolated static func remoteContentSamplingRegion(native: NativePortraitSize?) -> CGRect? {
+        native.map { CGRect(x: 0, y: 0, width: $0.width, height: $0.height) }
+    }
+
+    nonisolated static func isEmptyShellTree(_ info: AnyObject) -> Bool {
+        let roots: [[String: Any]]
+        if let array = info as? [[String: Any]] {
+            roots = array
+        } else if let dict = info as? [String: Any] {
+            roots = [dict]
+        } else {
+            return false
+        }
+        var stack = roots
+        var visited = 0
+        while let node = stack.popLast() {
+            visited += 1
+            if visited > 500 {
+                // A tree this large is definitionally not a shell.
+                return false
+            }
+            let isApplication = (node["role"] as? String) == "AXApplication"
+                || (node["type"] as? String) == "Application"
+            if !isApplication, OrientationCalibrator.frameRect(of: node) != nil {
+                return false
+            }
+            if let children = node["children"] as? [[String: Any]] {
+                stack.append(contentsOf: children)
+            }
+        }
+        return true
     }
 
     public static func fetchAccessibilityElements(
