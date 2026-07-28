@@ -106,9 +106,23 @@ extension IOSSimTapCommand: BatchConvertible {
 
 extension IOSSimSwipeCommand: BatchConvertible {
     public func toBatchPrimitives(context: BatchContext, logger: SimUseLogger) async throws -> [BatchPrimitive] {
-        let coords = try resolvedCoordinates()
+        let userCoords = try resolvedCoordinates()
         let swipeDuration = duration ?? 1.0
         let swipeDelta = delta ?? 50.0
+
+        let coords: (startX: Double, startY: Double, endX: Double, endY: Double)
+        if coordinateSpace == .ui {
+            let calibration = await context.uiSpaceCalibration(
+                fallbackMessage: "Screen orientation could not be determined; --coordinate-space ui coordinates were dispatched as device-native portrait and may be wrong if the device is rotated.",
+                logger: logger
+            )
+            let start = calibration.hidPoint(x: userCoords.startX, y: userCoords.startY)
+            let end = calibration.hidPoint(x: userCoords.endX, y: userCoords.endY)
+            coords = (start.x, start.y, end.x, end.y)
+        } else {
+            coords = (userCoords.startX, userCoords.startY, userCoords.endX, userCoords.endY)
+        }
+
         let swipeEvent = FBSimulatorHIDEvent.swipe(
             coords.startX,
             yStart: coords.startY,
@@ -139,16 +153,10 @@ extension IOSSimGestureCommand: BatchConvertible {
             // with tap selector steps. An unreachable AX tree degrades
             // to an identity dispatch with a recorded advisory instead
             // of failing the whole batch.
-            let calibration: OrientationCalibration
-            if let roots = try? await context.accessibilityRoots(logger: logger) {
-                calibration = await context.orientationCalibration(roots: roots, logger: logger)
-            } else {
-                calibration = .identity()
-                context.recordAdvisory(CommandAdvisory(
-                    kind: .orientationCalibrationFallback,
-                    message: "Screen orientation could not be determined; '\(preset.rawValue)' was dispatched in device-native portrait axes and may point the wrong way if the device is rotated."
-                ))
-            }
+            let calibration = await context.uiSpaceCalibration(
+                fallbackMessage: "Screen orientation could not be determined; '\(preset.rawValue)' was dispatched in device-native portrait axes and may point the wrong way if the device is rotated.",
+                logger: logger
+            )
             let visual = GestureOrientationMapping.visualSize(
                 explicitWidth: screenWidth, explicitHeight: screenHeight, calibration: calibration)
             let stroke = preset.strokes(screenWidth: visual.width, screenHeight: visual.height)[0]
@@ -170,8 +178,20 @@ extension IOSSimGestureCommand: BatchConvertible {
 
 extension IOSSimTouchCommand: BatchConvertible {
     public func toBatchPrimitives(context: BatchContext, logger: SimUseLogger) async throws -> [BatchPrimitive] {
-        let touchDownEvent = FBSimulatorHIDEvent.touch(direction: .down, x: pointX, y: pointY)
-        let touchUpEvent = FBSimulatorHIDEvent.touch(direction: .up, x: pointX, y: pointY)
+        // ui space is atomic-form-only (rejected in validate for split
+        // steps), so one batch-wide calibration covers both halves.
+        let point: (x: Double, y: Double)
+        if coordinateSpace == .ui {
+            let calibration = await context.uiSpaceCalibration(
+                fallbackMessage: "Screen orientation could not be determined; --coordinate-space ui coordinates were dispatched as device-native portrait and may be wrong if the device is rotated.",
+                logger: logger
+            )
+            point = calibration.hidPoint(x: pointX, y: pointY)
+        } else {
+            point = (pointX, pointY)
+        }
+        let touchDownEvent = FBSimulatorHIDEvent.touch(direction: .down, x: point.x, y: point.y)
+        let touchUpEvent = FBSimulatorHIDEvent.touch(direction: .up, x: point.x, y: point.y)
 
         if touchDown && touchUp {
             let holdDelay = delay ?? 0.1

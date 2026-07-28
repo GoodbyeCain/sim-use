@@ -210,15 +210,11 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
         preset: GesturePreset,
         logger: SimUseLogger
     ) async -> OrientationCalibration {
-        do {
-            return try await AccessibilityFetcher.fetchOrientationCalibration(for: udid, logger: logger)
-        } catch {
-            logger.info().log("Orientation calibration unavailable (\(error.localizedDescription)); dispatching \(preset.rawValue) in native portrait axes")
-            return .identity(advisory: CommandAdvisory(
-                kind: .orientationCalibrationFallback,
-                message: "Screen orientation could not be determined; '\(preset.rawValue)' was dispatched in device-native portrait axes and may point the wrong way if the device is rotated."
-            ))
-        }
+        await UISpaceCalibrationLoader.load(
+            udid: udid,
+            fallbackMessage: "Screen orientation could not be determined; '\(preset.rawValue)' was dispatched in device-native portrait axes and may point the wrong way if the device is rotated.",
+            logger: logger
+        )
     }
 
     private func runSingleTouch(
