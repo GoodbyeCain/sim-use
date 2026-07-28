@@ -1,4 +1,4 @@
-.PHONY: help build test e2e e2e-ios e2e-android eval clean viewer sync-skills
+.PHONY: help build test e2e e2e-ios e2e-android e2e-matrix eval clean viewer sync-skills
 
 # pipefail below needs bash; macOS /bin/sh is bash-in-posix-mode but
 # being explicit costs nothing.
@@ -31,6 +31,7 @@ help:
 	@echo "  make e2e     Run BOTH iOS + Android E2E suites in sequence (~15 min iOS alone)"
 	@echo "  make e2e-ios      Run iOS E2E tests on a booted simulator (~15 min for a full green run)"
 	@echo "  make e2e-android  Run Android E2E tests on a connected device/emulator"
+	@echo "  make e2e-matrix   Run iOS E2E across Xcode 26/27 x Simulator/Device Hub legs"
 	@echo "  make eval    Run agent evals (real \`claude -p\` cost; prompts first)"
 	@echo "  make clean   Clean Swift build artifacts"
 
@@ -79,6 +80,14 @@ e2e-ios:
 # ANDROID_SERIAL (default emulator-5554), and runs the Android suites.
 e2e-android:
 	./scripts/test-runner-android.sh
+
+# iOS E2E matrix: Xcode 26/27 x Device-Hub-open/closed legs. One leg runs
+# the full suite (default x27-hub), the rest run the smoke tier; legs whose
+# Xcode is not installed are skipped. Quits Device Hub and shuts down every
+# booted simulator along the way. Pass options via ARGS, e.g.
+# `make e2e-matrix ARGS="--full all"` or `ARGS="--legs x27-sim,x27-hub"`.
+e2e-matrix:
+	./scripts/e2e-matrix.sh $(ARGS)
 
 # Agent evals: a headless `claude -p` drives the bundled skill against the
 # Playground apps. Each case makes real API calls, so the wrapper checks the
