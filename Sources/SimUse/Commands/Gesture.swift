@@ -37,9 +37,12 @@ struct Gesture: SimUseExecutableCommand {
           sim-use gesture rotate-cw --angle 45 --udid SIMULATOR_UDID
 
         Platforms:
-          * iOS — coordinates default to iPhone 15 (390×844); pass --screen-width
-            and --screen-height for other devices. HID granularity is controlled
-            by --delta (single-finger) or --steps / --step-ms (multi-touch).
+          * iOS — single-finger presets are orientation-aware: their math runs
+            in the current visual space (auto-detected size and rotation), so
+            scroll-up scrolls content up on a rotated device too. Pinch/rotate
+            presets remain device-native portrait space (390×844 default).
+            HID granularity is controlled by --delta (single-finger) or
+            --steps / --step-ms (multi-touch).
           * Android — coordinates default to the device's real display in pixels
             (auto-detected via the bridge). --delta, --steps, --step-ms are
             iOS-HID-specific and silently ignored on Android, since
@@ -50,10 +53,10 @@ struct Gesture: SimUseExecutableCommand {
     @Argument(help: "The gesture preset to perform.")
     var preset: GesturePreset
 
-    @Option(name: .customLong("screen-width"), help: "Screen width in points (default: 390 for iPhone 15).")
+    @Option(name: .customLong("screen-width"), help: "Canvas width for the preset math. iOS single-finger presets: visual space, auto-detected by default (390 fallback); iOS pinch/rotate presets: device-native portrait, fixed 390 default. Android: real display pixels, auto-detected for all presets.")
     var screenWidth: Double?
 
-    @Option(name: .customLong("screen-height"), help: "Screen height in points (default: 844 for iPhone 15).")
+    @Option(name: .customLong("screen-height"), help: "Canvas height for the preset math. iOS single-finger presets: visual space, auto-detected by default (844 fallback); iOS pinch/rotate presets: device-native portrait, fixed 844 default. Android: real display pixels, auto-detected for all presets.")
     var screenHeight: Double?
 
     @Option(name: .customLong("duration"), help: "Duration of the gesture in seconds. Defaults to the preset baseline (0.3s edge / 0.5s scroll+pinch+rotate), except rotate presets auto-extend to |angle|/180s for sweeps > 90° so angular velocity stays near 180°/sec (recogniser sweet spot). Pass explicitly to override.")

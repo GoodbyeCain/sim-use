@@ -35,6 +35,18 @@ struct CommandAdvisoryContractTests {
         #expect(decoded.y == 20)
     }
 
+    @Test("gesture result encodes without the advisory and decodes it as nil")
+    func gestureResult() throws {
+        let result = IOSSimGestureCommand.ExecutionResult(commandAdvisory: contractAdvisory)
+        #expect(result.commandAdvisory == contractAdvisory)
+
+        let json = try encodedJSON(result)
+        #expect(json == #"{}"#)
+
+        let decoded = try JSONDecoder().decode(IOSSimGestureCommand.ExecutionResult.self, from: Data(json.utf8))
+        #expect(decoded.commandAdvisory == nil)
+    }
+
     @Test("batch result encodes without the advisory and decodes it as nil")
     func batchResult() throws {
         let result = IOSSimBatchCommand.ExecutionResult(stepsExecuted: 3, commandAdvisory: contractAdvisory)

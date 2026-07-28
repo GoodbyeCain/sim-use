@@ -10,8 +10,18 @@ import SimUseCore
 /// `sim-use ios gesture`. The top-level command resolves the target
 /// platform via `PlatformRouter` and forwards iOS UDIDs through here.
 public struct IOSSimGestureCommand: SimUseExecutableCommand {
-    public struct ExecutionResult: Codable {
-        public init() {}
+    public struct ExecutionResult: Codable, CommandAdvisoryProviding {
+        /// Excluded from the encoded `data` payload via `CodingKeys`
+        /// (the default value keeps decode synthesis working) — the
+        /// envelope hoists it to the top-level `advisory` key. See
+        /// `CommandAdvisoryProviding` for the contract.
+        public var commandAdvisory: CommandAdvisory? = nil
+
+        public init(commandAdvisory: CommandAdvisory? = nil) {
+            self.commandAdvisory = commandAdvisory
+        }
+
+        private enum CodingKeys: CodingKey {}
     }
 
     public static let configuration = CommandConfiguration(
@@ -20,7 +30,9 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
         discussion: """
         Execute common gesture patterns without specifying coordinates.
 
-        Single-finger presets:
+        Single-finger presets (visual directions — orientation-aware,
+        so scroll-up scrolls the on-screen content up on a rotated
+        device too):
           scroll-up, scroll-down, scroll-left, scroll-right
           swipe-from-left-edge, swipe-from-right-edge
           swipe-from-top-edge, swipe-from-bottom-edge
@@ -34,10 +46,10 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
     @Argument(help: "The gesture preset to perform.")
     public var preset: GesturePreset
 
-    @Option(name: .customLong("screen-width"), help: "Screen width in points (default: 390 for iPhone 15).")
+    @Option(name: .customLong("screen-width"), help: "Canvas width in points for the preset math. Single-finger presets: visual space, auto-detected from the current orientation by default (390 when the screen size is unknown). Pinch/rotate presets: device-native portrait space, fixed 390 default.")
     public var screenWidth: Double?
 
-    @Option(name: .customLong("screen-height"), help: "Screen height in points (default: 844 for iPhone 15).")
+    @Option(name: .customLong("screen-height"), help: "Canvas height in points for the preset math. Single-finger presets: visual space, auto-detected from the current orientation by default (844 when the screen size is unknown). Pinch/rotate presets: device-native portrait space, fixed 844 default.")
     public var screenHeight: Double?
 
     @Option(name: .customLong("duration"), help: "Duration of the gesture in seconds (uses preset default if not specified).")
@@ -144,8 +156,6 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
         try await setup(logger: logger)
         try await performGlobalSetup(logger: logger)
 
-        let width = screenWidth ?? 390.0
-        let height = screenHeight ?? 844.0
         // `recommendedDuration` auto-extends rotate sweeps beyond 90°
         // to keep angular velocity near 180°/sec (recogniser sweet
         // spot). Pinch / scroll / edge presets fall through to the
@@ -153,33 +163,74 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
         let gestureDuration = duration ?? preset.recommendedDuration(angle: angle)
 
         logger.info().log("Performing \(preset.description)")
-        logger.info().log("Screen size: \(width)x\(height)")
         logger.info().log("Duration: \(gestureDuration)s")
 
         if preset.isMultiTouch {
+            // Multi-touch presets stay in device-native portrait axes:
+            // orientation-aware pinch/rotate would need every
+            // interpolated sample mapped, not just the endpoints, and
+            // is out of scope for the issue #66 fix.
+            let width = screenWidth ?? GestureOrientationMapping.legacyWidth
+            let height = screenHeight ?? GestureOrientationMapping.legacyHeight
+            logger.info().log("Screen size: \(width)x\(height)")
             try await runMultiTouch(
                 width: width,
                 height: height,
                 duration: gestureDuration,
                 logger: logger
             )
-        } else {
-            try await runSingleTouch(
-                width: width,
-                height: height,
-                duration: gestureDuration,
-                logger: logger
-            )
+            logger.info().log("Gesture completed successfully")
+            return ExecutionResult()
         }
 
+        // Directional presets name a visual direction, so their math
+        // runs in the calibrated UI space and the endpoints cross into
+        // HID space (issue #66) — the same mapping tap selectors use.
+        let calibration = await Self.orientationCalibration(
+            udid: device.resolved, preset: preset, logger: logger)
+        let visual = GestureOrientationMapping.visualSize(
+            explicitWidth: screenWidth, explicitHeight: screenHeight, calibration: calibration)
+        logger.info().log("Visual canvas: \(visual.width)x\(visual.height) (orientation: \(calibration.orientation.rawValue))")
+        try await runSingleTouch(
+            visual: visual,
+            calibration: calibration,
+            duration: gestureDuration,
+            logger: logger
+        )
+
         logger.info().log("Gesture completed successfully")
-        return ExecutionResult()
+        return ExecutionResult(commandAdvisory: calibration.advisory)
     }
 
-    private func runSingleTouch(width: Double, height: Double, duration: Double, logger: SimUseLogger) async throws {
-        let coords = preset.coordinates(screenWidth: width, screenHeight: height)
+    /// The current orientation for a directional preset, degrading to
+    /// an identity (portrait) dispatch with an explicit advisory when
+    /// the simulator cannot be calibrated at all — never silently.
+    static func orientationCalibration(
+        udid: String,
+        preset: GesturePreset,
+        logger: SimUseLogger
+    ) async -> OrientationCalibration {
+        do {
+            return try await AccessibilityFetcher.fetchOrientationCalibration(for: udid, logger: logger)
+        } catch {
+            logger.info().log("Orientation calibration unavailable (\(error.localizedDescription)); dispatching \(preset.rawValue) in native portrait axes")
+            return .identity(advisory: CommandAdvisory(
+                kind: .orientationCalibrationFallback,
+                message: "Screen orientation could not be determined; '\(preset.rawValue)' was dispatched in device-native portrait axes and may point the wrong way if the device is rotated."
+            ))
+        }
+    }
+
+    private func runSingleTouch(
+        visual: (width: Double, height: Double),
+        calibration: OrientationCalibration,
+        duration: Double,
+        logger: SimUseLogger
+    ) async throws {
+        let stroke = preset.strokes(screenWidth: visual.width, screenHeight: visual.height)[0]
+        let coords = GestureOrientationMapping.hidStroke(stroke, calibration: calibration)
         let gestureDelta = delta ?? preset.defaultDelta
-        logger.info().log("Coordinates: (\(coords.startX), \(coords.startY)) to (\(coords.endX), \(coords.endY))")
+        logger.info().log("Coordinates (HID space): (\(coords.startX), \(coords.startY)) to (\(coords.endX), \(coords.endY))")
         logger.info().log("Delta: \(gestureDelta)px")
 
         var events: [FBSimulatorHIDEvent] = []
