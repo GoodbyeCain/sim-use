@@ -103,3 +103,27 @@ struct EmptyShellTreeTests {
         #expect(!AccessibilityFetcher.isEmptyShellTree("nonsense" as AnyObject))
     }
 }
+
+// The retry's grid points feed `translator.object(at:)`, which consumes
+// FRAMEBUFFER points (issue #34) — but upstream's default sampling
+// region is the root element's UI-space frame. Under rotation that
+// region samples the wrong band: points past the native width hit
+// nothing and a whole native band is never sampled at all. The retry
+// must therefore pass an explicit region in native-portrait bounds,
+// which covers every visible pixel regardless of orientation.
+
+@Suite("AccessibilityFetcher.remoteContentSamplingRegion")
+struct RemoteContentSamplingRegionTests {
+
+    @Test("The region is the native portrait bounds — orientation-independent")
+    func regionIsNativePortraitBounds() {
+        let region = AccessibilityFetcher.remoteContentSamplingRegion(
+            native: NativePortraitSize(width: 1032, height: 1376))
+        #expect(region == CGRect(x: 0, y: 0, width: 1032, height: 1376))
+    }
+
+    @Test("Unknown native size yields nil (upstream default region)")
+    func unknownNativeYieldsNil() {
+        #expect(AccessibilityFetcher.remoteContentSamplingRegion(native: nil) == nil)
+    }
+}

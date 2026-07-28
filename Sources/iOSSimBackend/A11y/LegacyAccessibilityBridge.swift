@@ -25,13 +25,26 @@ extension FBSimulator {
     /// perfectly valid) trees it burns a grid of hit-test XPCs — callers
     /// enable it only when the plain fetch came back as an empty shell
     /// (issue #64).
-    func legacyAccessibilityElements(nestedFormat: Bool, includeRemoteContent: Bool = false) async throws -> AnyObject {
+    ///
+    /// `remoteSamplingRegion` overrides upstream's default sampling region
+    /// (the root's UI-space frame). Pass the native-portrait bounds: the
+    /// grid points feed the framebuffer-space point hit-test (issue #34),
+    /// so a UI-space region samples the wrong band under rotation.
+    func legacyAccessibilityElements(
+        nestedFormat: Bool,
+        includeRemoteContent: Bool = false,
+        remoteSamplingRegion: CGRect? = nil
+    ) async throws -> AnyObject {
         let element = try await accessibilityElementForFrontmostApplication()
         defer { element.close() }
         var options = FBAccessibilityRequestOptions(nestedFormat: nestedFormat)
         if includeRemoteContent {
             options.collectFrameCoverage = true
-            options.remoteContentOptions = FBAccessibilityRemoteContentOptions()
+            var remote = FBAccessibilityRemoteContentOptions()
+            if let remoteSamplingRegion {
+                remote.region = remoteSamplingRegion
+            }
+            options.remoteContentOptions = remote
         }
         let response = try element.serialize(with: options)
         return response.elements as AnyObject

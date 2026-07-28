@@ -121,7 +121,10 @@ public struct AccessibilityFetcher {
         var remoteAdvisory: CommandAdvisory? = nil
         if isEmptyShellTree(info) {
             logger.info().log("Frontmost accessibility tree is an empty shell; retrying with remote-content discovery")
-            if let retried = try? await target.legacyAccessibilityElements(nestedFormat: true, includeRemoteContent: true),
+            if let retried = try? await target.legacyAccessibilityElements(
+                    nestedFormat: true,
+                    includeRemoteContent: true,
+                    remoteSamplingRegion: remoteContentSamplingRegion(native: native)),
                !isEmptyShellTree(retried) {
                 info = retried
                 remoteAdvisory = CommandAdvisory(
@@ -173,6 +176,19 @@ public struct AccessibilityFetcher {
     /// and oversized trees are NOT shells: failing closed keeps the retry
     /// (and its full-screen probe cost) off every path this predicate
     /// doesn't positively understand.
+    /// The grid-sampling region for the remote-content retry: the native
+    /// portrait framebuffer bounds. Upstream's default region is the root
+    /// element's UI-space frame, but the grid points feed the point
+    /// hit-test, which consumes FRAMEBUFFER points (issue #34) — under
+    /// rotation a UI-space region samples the wrong band (points past the
+    /// native width hit nothing; a whole native band is never sampled).
+    /// A full native-portrait grid covers every visible pixel regardless
+    /// of orientation. Nil (unknown screen size) falls back to upstream's
+    /// default region: correct in portrait, best-effort elsewhere.
+    nonisolated static func remoteContentSamplingRegion(native: NativePortraitSize?) -> CGRect? {
+        native.map { CGRect(x: 0, y: 0, width: $0.width, height: $0.height) }
+    }
+
     nonisolated static func isEmptyShellTree(_ info: AnyObject) -> Bool {
         let roots: [[String: Any]]
         if let array = info as? [[String: Any]] {
