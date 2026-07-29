@@ -5,6 +5,7 @@ import CompanionUtilities
 import FBSimulatorControl
 @preconcurrency import FBControlCore
 import SimUseCore
+import SimUseVideo
 
 /// iOS Simulator backend for the `screenshot` verb. Mirrors the flag
 /// surface of top-level `Screenshot` and is also reachable directly

@@ -68,14 +68,17 @@ After any non-trivial change, at minimum:
 
 ## Module layout
 
-Four SwiftPM targets; dependency graph flows in one direction.
+Five SwiftPM targets; dependency graph flows in one direction.
 
 | Target | Path | Depends on |
 |---|---|---|
 | `SimUseCore` | `Sources/SimUseCore/` | Foundation + ArgumentParser |
-| `iOSSimBackend` | `Sources/iOSSimBackend/` | SimUseCore + FB* XCFrameworks + AVFoundation |
+| `SimUseVideo` | `Sources/SimUseVideo/` | SimUseCore + AVFoundation/ImageIO |
+| `iOSSimBackend` | `Sources/iOSSimBackend/` | SimUseCore + SimUseVideo + FB* XCFrameworks + AVFoundation |
 | `AndroidBackend` | `Sources/AndroidBackend/` | SimUseCore + ArgumentParser |
-| `SimUse` (executable) | `Sources/SimUse/` | SimUseCore + iOSSimBackend + AndroidBackend + FB* |
+| `SimUse` (executable) | `Sources/SimUse/` | SimUseCore + SimUseVideo + iOSSimBackend + AndroidBackend + FB* |
+
+`SimUseVideo` holds the platform-neutral host-side video plumbing (H.264 Annex B parsing, passthrough muxing, `AVAssetWriter` encoding, frame utilities) shared by the iOS and Android recording/streaming paths. It must stay FB*-free — anything that needs FBSimulatorControl belongs in `iOSSimBackend` (e.g. the `VideoFrameUtilities.captureScreenshotData` extension), anything adb-shaped in `AndroidBackend`.
 
 ### Verb dispatch
 

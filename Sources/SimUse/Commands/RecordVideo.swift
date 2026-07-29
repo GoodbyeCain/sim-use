@@ -5,6 +5,7 @@ import FBSimulatorControl
 @preconcurrency import FBControlCore
 import AVFoundation
 import SimUseCore
+import SimUseVideo
 import AndroidBackend
 import iOSSimBackend
 
@@ -121,7 +122,7 @@ struct RecordVideo: SimUseExecutableCommand {
         let serial = device.resolved
         try assertAdbDeviceOnline(adb: adb, serial: serial)
 
-        let outputURL = try IOSSimRecordVideoCommand.prepareOutputURL(output: output)
+        let outputURL = try VideoOutputFile.prepareOutputURL(output: output)
         FileHandle.standardError.write(Data("Recording Android device \(serial) to \(outputURL.path)\n".utf8))
         FileHandle.standardError.write(Data("Press Ctrl+C to stop recording\n".utf8))
 

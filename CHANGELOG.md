@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Internal: the platform-neutral video plumbing (H.264 Annex B parsing, passthrough muxing, `AVAssetWriter` encoding, frame/output-path utilities) moved out of `iOSSimBackend` into a new `SimUseVideo` target, and the generic process-control helpers (`CancellationFlag`, `SignalObserver`, …) into `SimUseCore`. Pure restructuring — no CLI behavior change; unblocks hosting Android video verbs inside `AndroidBackend` (#78 groundwork).
 - `gesture --screen-width/--screen-height` on iOS: for **single-finger presets** they now describe a visual-space canvas and default to the auto-detected screen size of the current orientation (previously always 390×844, iPhone 15 portrait — wrong for iPads and every landscape state); 390×844 survives only when the screen size cannot be probed. **Pinch/rotate presets** keep the raw device-native portrait canvas with the fixed 390×844 default.
 
 ### Added
