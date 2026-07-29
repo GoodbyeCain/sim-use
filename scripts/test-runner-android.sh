@@ -30,6 +30,8 @@ PLAYGROUND_APK="Playgrounds/Android/app/build/outputs/apk/debug/app-debug.apk"
 ALL_SUITES=(
     "AndroidTapTests"
     "AndroidStreamVideoTests"
+    "AndroidRecordVideoTests"
+    "AndroidScreenshotTests"
     "AndroidSwipeScrollTests"
     "AndroidTypeTests"
     "AndroidKeyboardStateTests"

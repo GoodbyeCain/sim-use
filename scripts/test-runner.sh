@@ -387,6 +387,7 @@ run_tests() {
             "PermissionAlertTests"
             "RecordVideoTests"
             "RemoteContentRecoveryTests"
+            "ScreenshotTests"
             "StreamVideoDebugTest"
             "StreamVideoTests"
             "SwipeTests"
