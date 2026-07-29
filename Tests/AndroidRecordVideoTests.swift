@@ -36,6 +36,11 @@ struct AndroidRecordVideoTests {
         //   * screenrecord is VFR and a static screen can leave a whole
         //     segment frameless — drive screen activity for the entire
         //     recording so every segment has real frames to deliver.
+        //     The playground main screen ignores vertical swipes (nothing
+        //     scrolls), which starves the encoder no matter how hard the
+        //     driver swipes — so bring up the scroll-test list first, and
+        //     alternate the swipe direction because one-way swipes
+        //     saturate at the end of the list and stop changing pixels.
         //   * `finish(stopHostTime:)` re-appends the last access unit at
         //     the stop time to keep the final image visible, so duration
         //     and isPlayable look healthy even if the muxer dropped
@@ -46,12 +51,14 @@ struct AndroidRecordVideoTests {
         //     segment can appear there.
         let serial = try AndroidE2E.requireSerial()
         let adbPath = try AndroidE2E.adbPath()
+        try await AndroidE2E.launch(screen: "scroll-test")
         let activityDriver = Task {
-            for _ in 0..<7 {
+            for index in 0..<7 {
                 if Task.isCancelled { break }
                 let swipe = Process()
                 swipe.executableURL = URL(fileURLWithPath: adbPath)
-                swipe.arguments = ["-s", serial, "shell", "input", "swipe", "300", "800", "300", "400", "200"]
+                let (fromY, toY) = index.isMultiple(of: 2) ? ("1500", "600") : ("600", "1500")
+                swipe.arguments = ["-s", serial, "shell", "input", "swipe", "500", fromY, "500", toY, "200"]
                 swipe.standardOutput = Pipe()
                 swipe.standardError = Pipe()
                 try? swipe.run()

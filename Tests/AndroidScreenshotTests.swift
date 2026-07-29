@@ -6,8 +6,17 @@ import Testing
 struct AndroidScreenshotTests {
     private static let pngMagic = Data([0x89, 0x50, 0x4E, 0x47])
 
+    /// The bridge captures via `AccessibilityService.takeScreenshot`, which
+    /// enforces a ~500 ms minimum interval between calls; the back-to-back
+    /// tests in this serialized suite trip it and fail with
+    /// `screenshot_failed`. Settle past the window before each capture.
+    private static func settleScreenshotRateLimit() async throws {
+        try await Task.sleep(nanoseconds: 600_000_000)
+    }
+
     @Test("android screenshot writes a real PNG to the given path")
     func screenshotToFile() async throws {
+        try await Self.settleScreenshotRateLimit()
         let serial = try AndroidE2E.requireSerial()
         let simUsePath = try TestHelpers.getSimUsePath()
         let output = FileManager.default.temporaryDirectory
@@ -23,6 +32,7 @@ struct AndroidScreenshotTests {
 
     @Test("android screenshot --output - streams raw PNG bytes to stdout")
     func screenshotToStdout() async throws {
+        try await Self.settleScreenshotRateLimit()
         let serial = try AndroidE2E.requireSerial()
         let simUsePath = try TestHelpers.getSimUsePath()
 
@@ -53,6 +63,7 @@ struct AndroidScreenshotTests {
 
     @Test("top-level screenshot routes an adb serial to the Android engine")
     func screenshotTopLevel() async throws {
+        try await Self.settleScreenshotRateLimit()
         let serial = try AndroidE2E.requireSerial()
         let simUsePath = try TestHelpers.getSimUsePath()
         let output = FileManager.default.temporaryDirectory
