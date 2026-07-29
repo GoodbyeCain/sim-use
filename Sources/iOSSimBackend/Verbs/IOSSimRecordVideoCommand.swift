@@ -72,21 +72,7 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
     }
 
     public func validate() throws {
-        try Self.validateOptions(fps: fps, quality: quality, scale: scale)
-    }
-
-    public static func validateOptions(fps: Int?, quality: Int, scale: Double) throws {
-        if let fps {
-            guard fps >= 1 && fps <= 60 else {
-                throw ValidationError("FPS must be between 1 and 60")
-            }
-        }
-        guard quality >= 1 && quality <= 100 else {
-            throw ValidationError("Quality must be between 1 and 100")
-        }
-        guard scale >= 0.1 && scale <= 1.0 else {
-            throw ValidationError("Scale must be between 0.1 and 1.0")
-        }
+        try VideoRecordingOptions.validate(fps: fps, quality: quality, scale: scale)
     }
 
     public func execute() async throws -> ExecutionResult {

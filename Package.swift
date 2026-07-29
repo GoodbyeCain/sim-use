@@ -112,6 +112,7 @@ let package = Package(
             name: "SimUseVideo",
             dependencies: [
                 "SimUseCore",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
             path: "Sources/SimUseVideo"
         ),
@@ -136,6 +137,7 @@ let package = Package(
             name: "AndroidBackend",
             dependencies: [
                 "SimUseCore",
+                "SimUseVideo",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
             path: "Sources/AndroidBackend",
