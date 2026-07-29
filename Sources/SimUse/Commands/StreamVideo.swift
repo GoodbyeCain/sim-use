@@ -66,6 +66,12 @@ struct StreamVideo: SimUseExecutableCommand {
     var daemonBypass: Bool { true }
 
     func validate() throws {
+        // stdout carries the raw video bytes; the JSON envelope would be
+        // appended to the same stream after execute() and corrupt it for
+        // any consumer.
+        if json.enabled {
+            throw ValidationError("--json is not available on stream-video: stdout carries the raw video bytes and the envelope would corrupt the stream. The run summary is printed to stderr instead.")
+        }
         try VideoRecordingOptions.validateStreaming(fps: fps, quality: quality, scale: scale)
     }
 

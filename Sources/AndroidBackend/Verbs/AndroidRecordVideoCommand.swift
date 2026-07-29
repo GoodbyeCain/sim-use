@@ -210,7 +210,10 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
         })
 
         var firstSegment = true
-        var disconnected = false
+        // Set when the stream ends abnormally (device stopped feeding or
+        // screenrecord died); the recorder still finalizes so the partial
+        // MP4 survives, then the failure surfaces as the thrown error.
+        var streamFailure: String?
 
         segmentLoop: while true {
             if Task.isCancelled || cancellationFlag.isCancelled() || fatalBox.first != nil { break }
@@ -244,18 +247,26 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
                 break
             }
 
-            // The process exited on its own — either the API-level time limit
-            // was reached (restart to continue) or the device stopped feeding.
+            // The process exited on its own — a clean exit 0 is the API-level
+            // time limit (restart to continue); anything else is a dead
+            // device, adb, or encoder, which must NOT be blind-restarted
+            // into a crash loop just because the segment produced bytes.
             let exitCode = process.waitForExit(timeout: 2)
             let bytesThisSegment = process.stdoutByteCount - segmentStartBytes
+            let stderrTail = process.collectedStderr.trimmingCharacters(in: .whitespacesAndNewlines)
             if bytesThisSegment == 0 {
                 if !pipeline.firstFrameReceived {
                     let exitDescription = exitCode.map(String.init) ?? "timeout"
                     throw ScreenrecordUnavailableError(
-                        underlying: "screenrecord produced no output (exit \(exitDescription)): \(process.collectedStderr.trimmingCharacters(in: .whitespacesAndNewlines))"
+                        underlying: "screenrecord produced no output (exit \(exitDescription)): \(stderrTail)"
                     )
                 }
-                disconnected = true
+                streamFailure = "Android device stopped producing frames during recording"
+                break segmentLoop
+            }
+            guard exitCode == 0 else {
+                let exitDescription = exitCode.map(String.init) ?? "timeout"
+                streamFailure = "screenrecord exited unexpectedly (exit \(exitDescription)): \(stderrTail)"
                 break segmentLoop
             }
             FileHandle.standardError.write(Data("screenrecord segment ended (Android time limit); restarting (~100-300ms gap)\n".utf8))
@@ -271,8 +282,8 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
         }
 
         if let fatal = fatalBox.first { throw fatal }
-        if disconnected {
-            throw CLIError(errorDescription: "Android device stopped producing frames during recording; partial recording saved to \(outputURL.path)")
+        if let streamFailure {
+            throw CLIError(errorDescription: "\(streamFailure); partial recording saved to \(outputURL.path)")
         }
     }
 

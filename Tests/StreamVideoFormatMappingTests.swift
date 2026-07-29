@@ -47,4 +47,20 @@ struct StreamVideoFormatMappingTests {
         let command = try StreamVideo.parse(["--format", "h264", "--udid", "emulator-5554"])
         #expect(command.format == .h264)
     }
+
+    // stdout carries the raw video bytes, so the summary envelope can
+    // never share it — all three surfaces must reject the flag at
+    // validation time rather than corrupt the stream after the fact.
+    @Test("--json is rejected on every stream-video surface")
+    func jsonRejectedEverywhere() {
+        #expect(throws: (any Error).self) {
+            _ = try StreamVideo.parse(["--json", "--udid", "00000000-0000-0000-0000-000000000000"])
+        }
+        #expect(throws: (any Error).self) {
+            _ = try AndroidStreamVideoCommand.parse(["--json", "--device", "emulator-5554"])
+        }
+        #expect(throws: (any Error).self) {
+            _ = try IOSSimStreamVideoCommand.parse(["--json", "--udid", "00000000-0000-0000-0000-000000000000"])
+        }
+    }
 }

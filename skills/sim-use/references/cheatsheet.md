@@ -4,8 +4,8 @@
 
 | Namespace | Scope | Examples |
 |---|---|---|
-| `sim-use <verb>` | Cross-platform (iOS + Android) | `ui`, `tap`, `swipe`, `type`, `paste`, `button`, `gesture`, `screenshot`, `record-video`, `app-state` |
-| `sim-use ios <verb>` | iOS Simulator only | `key`, `key-combo`, `key-sequence`, `stream-video`, `batch` |
+| `sim-use <verb>` | Cross-platform (iOS + Android) | `ui`, `tap`, `swipe`, `type`, `paste`, `button`, `gesture`, `screenshot`, `record-video`, `stream-video`, `app-state` |
+| `sim-use ios <verb>` | iOS Simulator only | `key`, `key-combo`, `key-sequence`, `batch` |
 | `sim-use android <verb>` | Android device only | `init`, `devices`, `ping` |
 
 ## Device resolution
@@ -124,7 +124,8 @@ sim-use touch -x 150 -y 250 --down --up --delay 1.0  # long press
 sim-use screenshot --output shot.png
 sim-use record-video --output recording.mp4             # H.264, 30 fps default; Ctrl+C to stop
 sim-use record-video --output smooth.mp4 --fps 60       # iOS: constant rate up to 60 fps (Android ignores --fps, native rate)
-sim-use ios stream-video --fps 10 --format mjpeg        # iOS only
+sim-use stream-video --fps 10 --format mjpeg > out.mjpeg  # live JPEG stream (both platforms)
+sim-use stream-video --format h264 | ffplay -f h264 -      # Android only: native H.264 passthrough (VFR)
 ```
 
 ### Stopping a backgrounded recording

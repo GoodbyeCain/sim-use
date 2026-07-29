@@ -68,7 +68,7 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
     @Option(help: "Scale factor (0.1-1.0, default: 1.0)")
     public var scale: Double = 1.0
 
-    @Flag(name: .customLong("json"), help: "Emit the unified `{ok, data}` summary envelope after the stream ends. Mirrors the cross-platform `stream-video --json` shape.")
+    @Flag(name: .customLong("json"), help: "Unavailable on stream-video — the video bytes own stdout. The flag exists only so agents get a targeted error instead of 'Unknown option'.")
     public var jsonOutput: Bool = false
 
     public init() {}
@@ -84,6 +84,11 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
     public var daemonBypass: Bool { true }
 
     public func validate() throws {
+        // stdout carries the raw video bytes; the JSON envelope would be
+        // appended to the same stream after execute() and corrupt it.
+        if jsonOutput {
+            throw ValidationError("--json is not available on stream-video: stdout carries the raw video bytes and the envelope would corrupt the stream. The run summary is printed to stderr instead.")
+        }
         try VideoRecordingOptions.validateStreaming(fps: fps, quality: quality, scale: scale)
     }
 
@@ -241,17 +246,23 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
                 break
             }
 
-            // The process exited on its own — either the time limit was
-            // reached (restart to continue) or the device stopped feeding.
+            // The process exited on its own — a clean exit 0 is the time
+            // limit (restart to continue); anything else is a dead device,
+            // adb, or encoder, which must NOT be blind-restarted into a
+            // crash loop just because the segment produced some bytes.
             let exitCode = process.waitForExit(timeout: 2)
             let bytesThisSegment = process.stdoutByteCount - segmentStartBytes
+            let stderrTail = process.collectedStderr.trimmingCharacters(in: .whitespacesAndNewlines)
             if bytesThisSegment == 0 {
-                let stderrTail = process.collectedStderr.trimmingCharacters(in: .whitespacesAndNewlines)
                 if sink.bytesWritten == 0 {
                     let exitDescription = exitCode.map(String.init) ?? "timeout"
                     throw CLIError(errorDescription: "screenrecord produced no output (exit \(exitDescription)): \(stderrTail). Use --format mjpeg for the screencap-based stream instead.")
                 }
                 throw CLIError(errorDescription: "Android device stopped producing frames during streaming (\(stderrTail))")
+            }
+            guard exitCode == 0 else {
+                let exitDescription = exitCode.map(String.init) ?? "timeout"
+                throw CLIError(errorDescription: "screenrecord exited unexpectedly (exit \(exitDescription)) mid-stream: \(stderrTail)")
             }
             FileHandle.standardError.write(Data("screenrecord segment ended (time limit); restarting stream (~100-300ms gap; the new segment re-emits SPS/PPS)\n".utf8))
         }

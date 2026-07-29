@@ -22,8 +22,9 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
     /// Summary of a completed stream run. The actual video bytes are
     /// written to stdout inline during `execute()` — they are a side
     /// channel, not part of the Result. Streaming commands bypass the
-    /// daemon transport for exactly this reason, but the typed Result
-    /// still powers a future `--json` flag that emits the summary alone.
+    /// daemon transport for exactly this reason, and `--json` is
+    /// rejected in validate(): the envelope would be appended to the
+    /// same stdout as the video bytes and corrupt the stream.
     public struct ExecutionResult: Codable {
         public let framesStreamed: UInt64
         public let durationSeconds: Double
@@ -90,6 +91,11 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
     }
 
     public func validate() throws {
+        // stdout carries the raw video bytes; the JSON envelope would be
+        // appended to the same stream after execute() and corrupt it.
+        if json.enabled {
+            throw ValidationError("--json is not available on stream-video: stdout carries the raw video bytes and the envelope would corrupt the stream. The run summary is printed to stderr instead.")
+        }
         try VideoRecordingOptions.validateStreaming(fps: fps, quality: quality, scale: scale)
     }
 
