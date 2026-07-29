@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- JPEG frame scaling now produces the requested pixel dimensions on Retina displays instead of multiplying the result by the screen backing scale (#83).
 - The `SIM_USE_VERSION` build-time override actually reaches the version stamp now. `VersionPlugin` registered its generator command with an empty environment, so the documented "environment variable first" priority was dead code and every build fell back to `git describe` — release builds happened to be correct only because they build on the tagged commit, while `scripts/dev-install.sh` builds stamped a stale describe string. The override is now resolved in the plugin process and baked into the command's argv, which also makes a changed override invalidate SPM's command cache without requiring a source-file edit.
 
 ## [0.12.0] - 2026-07-29
