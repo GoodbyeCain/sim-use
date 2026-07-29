@@ -155,7 +155,7 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
         }
     }
 
-    private static func assertAdbDeviceOnline(adb: Adb, serial: String) throws {
+    static func assertAdbDeviceOnline(adb: Adb, serial: String) throws {
         let devices: [Adb.Device]
         do {
             devices = try adb.devices()
@@ -197,7 +197,7 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
         let recordingSize = scale < 1.0 ? baseSize.map { scaledSize($0, scale: scale) } : nil
         let bitrateSize = recordingSize ?? baseSize
         let bitrate = bitrateSize.map { H264StreamRecorder.estimateBitrate(width: $0.width, height: $0.height, fps: 30, quality: quality) }
-        let arguments = screenrecordArguments(serial: serial, sdk: sdk, bitrate: bitrate, size: recordingSize)
+        let arguments = screenrecordArguments(serial: serial, sdk: sdk, bitrate: bitrate, size: recordingSize, timeLimitOverride: screenrecordTimeLimitOverride())
 
         let recorder = try H264PassthroughRecorder(outputURL: outputURL)
         var recorderFinalized = false
@@ -210,7 +210,10 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
         })
 
         var firstSegment = true
-        var disconnected = false
+        // Set when the stream ends abnormally (device stopped feeding or
+        // screenrecord died); the recorder still finalizes so the partial
+        // MP4 survives, then the failure surfaces as the thrown error.
+        var streamFailure: String?
 
         segmentLoop: while true {
             if Task.isCancelled || cancellationFlag.isCancelled() || fatalBox.first != nil { break }
@@ -244,18 +247,26 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
                 break
             }
 
-            // The process exited on its own — either the API-level time limit
-            // was reached (restart to continue) or the device stopped feeding.
+            // The process exited on its own — a clean exit 0 is the API-level
+            // time limit (restart to continue); anything else is a dead
+            // device, adb, or encoder, which must NOT be blind-restarted
+            // into a crash loop just because the segment produced bytes.
             let exitCode = process.waitForExit(timeout: 2)
             let bytesThisSegment = process.stdoutByteCount - segmentStartBytes
+            let stderrTail = process.collectedStderr.trimmingCharacters(in: .whitespacesAndNewlines)
             if bytesThisSegment == 0 {
                 if !pipeline.firstFrameReceived {
                     let exitDescription = exitCode.map(String.init) ?? "timeout"
                     throw ScreenrecordUnavailableError(
-                        underlying: "screenrecord produced no output (exit \(exitDescription)): \(process.collectedStderr.trimmingCharacters(in: .whitespacesAndNewlines))"
+                        underlying: "screenrecord produced no output (exit \(exitDescription)): \(stderrTail)"
                     )
                 }
-                disconnected = true
+                streamFailure = "Android device stopped producing frames during recording"
+                break segmentLoop
+            }
+            guard exitCode == 0 else {
+                let exitDescription = exitCode.map(String.init) ?? "timeout"
+                streamFailure = "screenrecord exited unexpectedly (exit \(exitDescription)): \(stderrTail)"
                 break segmentLoop
             }
             FileHandle.standardError.write(Data("screenrecord segment ended (Android time limit); restarting (~100-300ms gap)\n".utf8))
@@ -271,19 +282,19 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
         }
 
         if let fatal = fatalBox.first { throw fatal }
-        if disconnected {
-            throw CLIError(errorDescription: "Android device stopped producing frames during recording; partial recording saved to \(outputURL.path)")
+        if let streamFailure {
+            throw CLIError(errorDescription: "\(streamFailure); partial recording saved to \(outputURL.path)")
         }
     }
 
-    private static func detectSDK(adb: Adb, serial: String) -> Int {
+    static func detectSDK(adb: Adb, serial: String) -> Int {
         guard let result = try? adb.shell(serial: serial, args: ["getprop", "ro.build.version.sdk"]) else {
             return 30
         }
         return Int(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 30
     }
 
-    private static func detectSize(adb: Adb, serial: String) -> (width: Int, height: Int)? {
+    static func detectSize(adb: Adb, serial: String) -> (width: Int, height: Int)? {
         guard let result = try? adb.shell(serial: serial, args: ["wm", "size"]) else {
             return nil
         }
@@ -318,12 +329,29 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
         return nil
     }
 
+    /// Debug override for screenrecord's per-invocation time limit
+    /// (`SIM_USE_SCREENRECORD_TIME_LIMIT`, seconds). API ≥ 34 devices
+    /// stream unlimited (`--time-limit 0`), so the segment-restart path
+    /// never fires naturally there — this forces short segments so tests
+    /// and manual runs can exercise restarts without an API < 34 device.
+    static func screenrecordTimeLimitOverride(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Int? {
+        guard let raw = environment["SIM_USE_SCREENRECORD_TIME_LIMIT"],
+              let value = Int(raw), value > 0 else {
+            return nil
+        }
+        return value
+    }
+
     /// Build the `adb screenrecord` argument vector. `--time-limit 0`
     /// (unlimited) is only valid on API ≥ 34; older devices hard-cap at 180 s,
     /// which the segment loop handles by restarting.
-    static func screenrecordArguments(serial: String, sdk: Int, bitrate: Int?, size: (width: Int, height: Int)?) -> [String] {
+    static func screenrecordArguments(serial: String, sdk: Int, bitrate: Int?, size: (width: Int, height: Int)?, timeLimitOverride: Int? = nil) -> [String] {
         var arguments = ["-s", serial, "exec-out", "screenrecord", "--output-format=h264"]
-        if sdk >= 34 {
+        if let timeLimitOverride {
+            arguments.append(contentsOf: ["--time-limit", "\(timeLimitOverride)"])
+        } else if sdk >= 34 {
             arguments.append(contentsOf: ["--time-limit", "0"])
         }
         if let bitrate {
@@ -435,7 +463,7 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
     /// while the screencap itself is the dominant cost; raising this
     /// TODO is the cheaper performance lever to reach for first when
     /// the frame loop becomes the bottleneck.
-    private static func captureAndroidScreencap(adbPath: String, serial: String) throws -> Data {
+    static func captureAndroidScreencap(adbPath: String, serial: String) throws -> Data {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: adbPath)
         process.arguments = ["-s", serial, "exec-out", "screencap", "-p"]

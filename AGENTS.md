@@ -75,7 +75,7 @@ Five SwiftPM targets; dependency graph flows in one direction.
 | `SimUseCore` | `Sources/SimUseCore/` | Foundation + ArgumentParser |
 | `SimUseVideo` | `Sources/SimUseVideo/` | SimUseCore + AVFoundation/ImageIO |
 | `iOSSimBackend` | `Sources/iOSSimBackend/` | SimUseCore + SimUseVideo + FB* XCFrameworks + AVFoundation |
-| `AndroidBackend` | `Sources/AndroidBackend/` | SimUseCore + ArgumentParser |
+| `AndroidBackend` | `Sources/AndroidBackend/` | SimUseCore + SimUseVideo + ArgumentParser |
 | `SimUse` (executable) | `Sources/SimUse/` | SimUseCore + SimUseVideo + iOSSimBackend + AndroidBackend + FB* |
 
 `SimUseVideo` holds the platform-neutral host-side video plumbing (H.264 Annex B parsing, passthrough muxing, `AVAssetWriter` encoding, frame utilities) shared by the iOS and Android recording/streaming paths. It must stay FB*-free — anything that needs FBSimulatorControl belongs in `iOSSimBackend` (e.g. the `VideoFrameUtilities.captureScreenshotData` extension), anything adb-shaped in `AndroidBackend`.
@@ -88,7 +88,7 @@ A verb (tap, swipe, type, ...) reaches three surfaces:
 2. **`sim-use ios <verb>`** — `Sources/iOSSimBackend/Verbs/IOSSim<Verb>Command.swift`.
 3. **`sim-use android <verb>`** — `Sources/AndroidBackend/Verbs/Android<Verb>Command.swift`.
 
-Five verbs are iOS-only (`key`, `key-combo`, `key-sequence`, `stream-video`, `batch`) — no top-level alias.
+Four verbs are iOS-only (`key`, `key-combo`, `key-sequence`, `batch`) — no top-level alias.
 
 ### Adding a new verb
 

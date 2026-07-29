@@ -163,6 +163,11 @@ struct ForwarderInitializationGuardTests {
         assertFullyInitialized(try RecordVideo.parse(["--udid", iosUDID]).makeIOSSubcommand())
     }
 
+    @Test("stream-video forwarder copies every field")
+    func streamVideo() throws {
+        assertFullyInitialized(try StreamVideo.parse(["--udid", iosUDID]).makeIOSSubcommand())
+    }
+
     @Test("multi-touch forwarder copies every field")
     func multiTouch() throws {
         assertFullyInitialized(try MultiTouch.parse([

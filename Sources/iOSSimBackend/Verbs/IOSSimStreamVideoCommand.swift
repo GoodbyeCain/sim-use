@@ -7,11 +7,10 @@ import FBSimulatorControl
 import SimUseCore
 import SimUseVideo
 
-/// iOS Simulator backend for the `stream-video` verb. iOS-only — no
-/// Android peer. The Android path used to fail-fast with a redirect
-/// to `record-video`; with path B the entire verb only exists under
-/// `sim-use ios stream-video`, so an Android caller never reaches
-/// this code path in the first place.
+/// iOS Simulator backend for the `stream-video` verb. The top-level
+/// cross-platform `StreamVideo` forwards iOS UDIDs here (#78); an
+/// Android UDID passed directly to `sim-use ios stream-video` is
+/// redirected to the surfaces that serve it.
 public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
     public enum OutputFormat: String, ExpressibleByArgument, Codable, Sendable {
         case mjpeg
@@ -23,8 +22,9 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
     /// Summary of a completed stream run. The actual video bytes are
     /// written to stdout inline during `execute()` — they are a side
     /// channel, not part of the Result. Streaming commands bypass the
-    /// daemon transport for exactly this reason, but the typed Result
-    /// still powers a future `--json` flag that emits the summary alone.
+    /// daemon transport for exactly this reason, and `--json` is
+    /// rejected in validate(): the envelope would be appended to the
+    /// same stdout as the video bytes and corrupt the stream.
     public struct ExecutionResult: Codable {
         public let framesStreamed: UInt64
         public let durationSeconds: Double
@@ -67,7 +67,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
            PlatformRouter.looksLikeAndroid(arg) {
             // CLIError so the message survives our run() catch — see
             // IOSSimKeyCommand for the rationale.
-            throw CLIError(errorDescription: "stream-video is iOS-only. On Android, use `sim-use record-video --udid \(arg)` to capture an MP4 instead.")
+            throw CLIError(errorDescription: "`sim-use ios stream-video` only drives iOS simulators. For Android, use `sim-use stream-video --udid \(arg)` (or `sim-use android stream-video`).")
         }
         try device.resolve()
     }
@@ -91,19 +91,12 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
     }
 
     public func validate() throws {
-        try Self.validateOptions(fps: fps, quality: quality, scale: scale)
-    }
-
-    public static func validateOptions(fps: Int, quality: Int, scale: Double) throws {
-        guard fps >= 1 && fps <= 30 else {
-            throw ValidationError("FPS must be between 1 and 30")
+        // stdout carries the raw video bytes; the JSON envelope would be
+        // appended to the same stream after execute() and corrupt it.
+        if json.enabled {
+            throw ValidationError("--json is not available on stream-video: stdout carries the raw video bytes and the envelope would corrupt the stream. The run summary is printed to stderr instead.")
         }
-        guard quality >= 1 && quality <= 100 else {
-            throw ValidationError("Quality must be between 1 and 100")
-        }
-        guard scale >= 0.1 && scale <= 1.0 else {
-            throw ValidationError("Scale must be between 0.1 and 1.0")
-        }
+        try VideoRecordingOptions.validateStreaming(fps: fps, quality: quality, scale: scale)
     }
 
     public func execute() async throws -> ExecutionResult {

@@ -7,7 +7,7 @@ import SimUseCore
 /// Conformance attached to the iOS-side verb command structs so the
 /// `batch` step parser can lift a parsed step into a sequence of
 /// `BatchPrimitive`s. iOS-only HID verbs (`key`, `key-combo`,
-/// `key-sequence`, `stream-video`, `batch`) have no top-level
+/// `key-sequence`, `batch`) have no top-level
 /// cross-platform wrapper, and the cross-platform verbs (Tap / Type /
 /// Paste / Button / Swipe / Touch / Gesture) keep all their
 /// batch-relevant state on their `IOSSim<Verb>Command` sub-struct —
