@@ -37,6 +37,7 @@ Plan, code, **verify**, ship — teach this CLI to your agent and close the last
 
 
 - [The observe → act loop](#the-observe--act-loop)
+- [Why sim-use](#why-sim-use)
 - [Install](#install)
 - [Platforms](#platforms)
 - [Commands](#commands)
@@ -65,9 +66,8 @@ Multiple selector styles for different needs:
 | `--label` | `tap --label "General"` | Scripted flows with `--wait-timeout` |
 | `-x -y` / `--point` | `tap --point 100,200` | Last resort — no AX data |
 
-AX-derived selectors work in any orientation: sim-use self-calibrates the
-current rotation on each command and maps outline coordinates onto the
-framebuffer before dispatching (iOS). Explicit `-x/-y`/`--point` is always
+AX-derived selectors work in any orientation — sim-use self-calibrates the
+current rotation on each command (iOS). Explicit `-x/-y`/`--point` is
 interpreted in the device-native portrait space.
 
 
@@ -115,29 +115,13 @@ The XCFrameworks are built without library evolution, so their Swift
 modules are locked to the toolchain that produced them — re-run
 `./scripts/build.sh dev` after switching Xcode versions.
 
-### Xcode 27 (beta) compatibility
+### Xcode 27 (beta)
 
-sim-use fully supports Xcode 27 betas that ship `SimulatorKit.framework`
-in `Contents/SharedFrameworks` (Beta 4 and later; Beta 1 shipped without
-it), **including Device Hub workflows**:
-
-- The HID transport is selected automatically per simulator boot: a
-  simulator whose legacy HID was suppressed at boot (booted while Device
-  Hub was open) is driven through dtuhidd's CoreDevice HID service, and
-  everything else through the legacy SimulatorKit path. No reboot dance,
-  no guard errors — `tap` / `type` / `swipe` work in both states.
-- A selection made within 15 s of boot (dtuhidd attaches 0–3 s after
-  boot, so a `simctl boot && sim-use type` script can probe too early)
-  is used once but not cached; the next command re-derives it, so an
-  early wrong pick never sticks for the boot.
-- `SIM_USE_HID_TRANSPORT=indigo|dtuhid` forces a specific transport for
-  debugging, and `SIM_USE_DEBUG=1` surfaces the transport-selection
-  signals (and other internal info-lines) on stderr / in the daemon
-  logfile (combine either with `SIM_USE_NO_DAEMON=1` — the per-UDID
-  daemon keeps the environment it was first spawned with).
-- Xcode 27 no longer bundles Simulator.app; the one from an Xcode 26.x
-  install still works for viewing simulators, as does Device Hub itself.
-- Work record: `docs/ai/xxxx-xcode27-support/README.md`.
+Xcode 27 betas are fully supported from Beta 4 on (earlier betas ship no
+usable `SimulatorKit.framework`), including simulators booted while
+Device Hub is open — the HID transport is selected automatically per
+boot. Note that Xcode 27 no longer bundles Simulator.app; the one from an
+Xcode 26.x install still works, as does Device Hub itself.
 
 ### Agent skill
 
@@ -166,9 +150,9 @@ For Android, run `sim-use android init --device <serial>` once to install the br
 
 All device-scoped commands accept `--device <ID>` (optional when only one simulator is booted). Three command layers:
 
-  * **Top-level** — cross-platform verbs: `ui`, `tap`, `swipe`, `type`, `paste`, `button`, `gesture`, `keyboard-state`, `screenshot`, `record-video`, `stream-video`, `app-state`. Same flags on iOS and Android.
+  * **Top-level** — cross-platform verbs: `ui`, `tap`, `long-press`, `swipe`, `touch`, `multi-touch`, `type`, `paste`, `button`, `gesture`, `keyboard-state`, `screenshot`, `record-video`, `stream-video`, `app-state`. Same flags on iOS and Android.
   * **`sim-use ios <verb>`** — iOS-only: `key`, `key-combo`, `key-sequence`, `batch`.
-  * **`sim-use android <verb>`** — Android-only: `init`, `devices`, `ping`.
+  * **`sim-use android <verb>`** — Android-only: `init`, `devices`, `ping`, `scroll`.
 
 Run `sim-use --help` or `sim-use <command> --help` for the full flag set.
 
@@ -180,24 +164,17 @@ UDID="B34FF305-5EA8-412B-943F-1D0371CA17FF"
 ### Touch & gestures
 
 ```bash
-sim-use tap -x 100 -y 200 --device $UDID
-sim-use tap --point 100,200 --device $UDID                    # same, pair form
-sim-use tap @5 --device $UDID                                 # alias cache
-sim-use tap "#3" --device $UDID                               # 3rd cell of the dominant list
-sim-use tap "#2@2" --device $UDID                             # 2nd cell of the 2nd detected list
+sim-use tap @5 --device $UDID                                 # alias from the last `ui`
+sim-use tap "#3" --device $UDID                               # 3rd cell of the dominant list ("#2@2": 2nd cell, 2nd list)
 sim-use tap "#settingsButton" --device $UDID                  # AXUniqueId
-sim-use tap --id Safari --device $UDID
-sim-use tap --label "Safari" --device $UDID
-sim-use tap --value "On" --device $UDID
+sim-use tap --label "Safari" --device $UDID                   # also: --id, --value
+sim-use tap -x 100 -y 200 --device $UDID                      # raw point (or --point 100,200)
 
-sim-use swipe --from 100,300 --to 300,100 --device $UDID
-sim-use swipe 100,300 300,100 --device $UDID
-sim-use swipe --start-x 100 --start-y 300 --end-x 300 --end-y 100 --device $UDID
-sim-use swipe --start-x 50 --start-y 500 --end-x 350 --end-y 500 --duration 2.0 --delta 25 --device $UDID
+sim-use swipe --from 100,300 --to 300,100 --device $UDID      # positional "100,300 300,100" works too
+sim-use swipe --from 50,500 --to 350,500 --duration 2.0 --delta 25 --device $UDID
 
 # Low-level touch control
-sim-use touch -x 150 -y 250 --down --device $UDID
-sim-use touch -x 150 -y 250 --up --device $UDID
+sim-use touch -x 150 -y 250 --down --device $UDID             # then: touch ... --up
 sim-use touch -x 150 -y 250 --down --up --delay 1.0 --device $UDID   # long press
 
 # Gesture presets
@@ -234,8 +211,7 @@ The default Cmd+V path needs a connected hardware keyboard on the simulator (Sim
 
 ```bash
 sim-use paste 'ABC 日本語' --via-menu --target-id chatTextField --device $UDID
-sim-use paste 'NEW' --replace --via-menu --target-id chatTextField --device $UDID
-sim-use paste 'at xy' --via-menu --target-x 171 --target-y 513 --device $UDID
+sim-use paste 'at xy' --replace --via-menu --target-x 171 --target-y 513 --device $UDID
 ```
 
 iOS 16+ gates the first paste per app session behind an "Allow Paste" prompt (modal dialog on iOS 16, inline bubble on iOS 17+). sim-use does not auto-dismiss it — approve once interactively (iOS grants a ~60 s grace window for the session) or pre-configure Settings → Paste from Other Apps per app.
@@ -245,18 +221,14 @@ iOS 16+ gates the first paste per app session behind an "Allow Paste" prompt (mo
 Probe whether the software keyboard is visible. Primary use: pick between the `paste` Cmd+V default and `--via-menu` path.
 
 ```bash
-# Text form — prints `soft` or `hidden`. Both exit 0; non-zero is reserved
-# for probe failure (unreachable device, AX fetch error). Branch on stdout.
+# Prints `soft` or `hidden` (both exit 0; non-zero = probe failure). Branch on stdout:
 if [[ "$(sim-use keyboard-state --device $UDID)" == soft ]]; then
   sim-use paste "$TEXT" --via-menu --target-id chatTextField --device $UDID
 else
   sim-use paste "$TEXT" --device $UDID
 fi
 
-# JSON envelope — consume data.visible; the envelope may carry diagnostic
-# counters alongside it for debugging false positives/negatives
-sim-use keyboard-state --json --device $UDID
-# -> {"ok":true,"data":{"visible":true, ...}}
+sim-use keyboard-state --json --device $UDID   # -> {"ok":true,"data":{"visible":true, ...}}
 ```
 
 ### Hardware buttons
@@ -270,10 +242,8 @@ sim-use button siri --device $UDID
 
 ### Low-level keyboard (iOS-only)
 
-These verbs speak USB HID keycodes — they live under `sim-use ios <verb>`
-because Android keyboard input goes through a different abstraction
-(`KeyEvent.KEYCODE_*` via `INJECT_EVENTS`). For Android text entry use
-`sim-use type` or `sim-use paste`.
+These verbs speak USB HID keycodes, which have no Android counterpart —
+for Android text entry use `sim-use type` or `sim-use paste`.
 
 ```bash
 # Individual key presses by HID keycode
@@ -288,7 +258,7 @@ sim-use ios key-combo --modifiers 227,225 --key 4 --device $UDID      # Cmd+Shif
 
 ### Batch chaining (iOS-only)
 
-Run multiple steps in a single invocation. Batch reuses one HID session and one AX snapshot across steps, cutting round-trip cost on multi-step flows. iOS-only because the runner pins an iOS HID session across steps — Android steps each round-trip through the bridge already, so batching saves nothing there.
+Run multiple steps in a single invocation. Batch reuses one HID session and one AX snapshot across steps, cutting round-trip cost on multi-step flows (Android steps each round-trip through the bridge already, so batching would save nothing there).
 
 ```bash
 sim-use ios batch --device $UDID \
@@ -345,21 +315,13 @@ sim-use record-video --device $UDID --quality 60 --scale 0.5 --output low-bw.mp4
 ```
 
 `record-video` captures a real H.264 stream and muxes it straight into the
-MP4 (passthrough — no per-frame screenshot re-encoding):
-
-  * **iOS** drives `FBSimulatorVideoStream` in eager H.264 mode at a constant
-    `--fps` (default 30, max 60). Because the stream carries no timestamps,
-    frames are laid out at exactly `1/fps`, so playback is smooth and the
-    requested rate is honored.
-  * **Android** pipes `adb screenrecord --output-format=h264` at the device's
-    native variable frame rate, so `--fps` is ignored there; `--quality` maps
-    to bitrate and `--scale` to `--size`. Recordings past the per-invocation
-    limit on API < 34 are stitched across `screenrecord` restarts
-    automatically.
-
-Rotating the display mid-recording stops capture on Android (an MP4 track
-can't change frame size). Press Ctrl+C to stop; sim-use finalises the MP4
-before exiting.
+MP4 (passthrough — no per-frame screenshot re-encoding). iOS records at a
+constant `--fps` (default 30, max 60); Android records at the device's
+native variable frame rate (`--fps` ignored, `--quality` → bitrate,
+`--scale` → size) and stitches across the `screenrecord` per-invocation
+limit on API < 34 automatically. Rotating the display mid-recording stops
+capture on Android (an MP4 track can't change frame size). Press Ctrl+C to
+stop; sim-use finalises the MP4 before exiting.
 
 ### Accessibility inspection
 
@@ -374,7 +336,7 @@ The `--json` envelope carries the raw accessibility tree under `data.raw` by def
 
 The outline uses region banding (`[Top]` / `[Content]` / `[Bottom]` / declared `Group` regions) and `@N` / `#N` / `#N@M` / `#<id>` alias addressing. When the device is rotated, the `App:` header carries an orientation tag (e.g. `(landscape-right)`) and the `--json` envelope an `orientation` field.
 
-A list cluster detector runs on every snapshot and attaches `#N` aliases to detected list cells. Outline lines for cells render as `@N #M` (dominant list) or `@N #M@S` (scope `S>1`); the `--json` envelope adds a sibling `lists` array, ordered by detector score, where each entry summarises one cluster as `{ scope, cellCount, cellHeight, containerRole, containerLabel, bbox, score }`. Per-cell membership is also surfaced through `entries[*].aliases.list = { scope, index }` so consumers can pivot on either shape. `lists[0]` is always the dominant cluster, or the array is empty when nothing list-shaped is on screen.
+A list cluster detector runs on every snapshot and attaches `#N` aliases to detected list cells — outline lines render as `@N #M` (dominant list) or `@N #M@S` (scope `S>1`). The `--json` envelope adds a `lists` array (one summary per cluster, ordered by detector score, dominant first) and per-cell membership under `entries[*].aliases.list`.
 
 ### App state & crash detection
 
@@ -404,12 +366,7 @@ Daemons self-exit after 600 s of idle and log to `/tmp/sim-use-<uid>/<UDID>.log`
 
 ## Architecture
 
-sim-use drives iOS Simulators through the lower-level XCFrameworks of Facebook's [idb](https://github.com/facebook/idb), Apple's Accessibility APIs, and the simulator HID pipeline. Android devices are driven through an on-device bridge APK that exposes the AccessibilityService tree and input injection over HTTP, tunnelled via `adb forward`.
-
-- **Single binary, single invocation.** No RPC daemon to manage manually; the optional per-UDID background daemon is auto-spawned and opt-out (`SIM_USE_NO_DAEMON=1`).
-- **Agent-first output.** `ui` emits a compact outline with stable `@N` / `#<id>` aliases designed to round-trip between an LLM and the simulator with minimal token cost.
-- **Full HID surface.** Tap, swipe, touch, gesture presets, hardware buttons, key combos, and IME-safe Unicode paste all exposed as first-class commands.
-- **Scriptable from day one.** Every command supports `--json` for machine consumption; `batch` collapses multi-step flows into a single invocation.
+sim-use drives iOS Simulators through the lower-level XCFrameworks of Facebook's [idb](https://github.com/facebook/idb) (statically linked), Apple's Accessibility APIs, and the simulator HID pipeline. Android devices are driven through an on-device bridge APK that exposes the AccessibilityService tree and input injection over HTTP, tunnelled via `adb forward`. Everything ships as a single binary; every command supports `--json` for machine consumption.
 
 
 ## Viewer
