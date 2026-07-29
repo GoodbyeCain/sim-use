@@ -5,6 +5,7 @@ import CompanionUtilities
 import FBSimulatorControl
 @preconcurrency import FBControlCore
 import SimUseCore
+import SimUseVideo
 
 /// iOS Simulator backend for the `stream-video` verb. iOS-only — no
 /// Android peer. The Android path used to fail-fast with a redirect

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import Testing
 import Foundation
-@testable import iOSSimBackend
+@testable import SimUseVideo
 
 @Suite("AnnexBStreamParser NAL splitting and access-unit assembly")
 struct AnnexBStreamParserTests {

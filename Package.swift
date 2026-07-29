@@ -76,6 +76,10 @@ let package = Package(
             targets: ["SimUseCore"]
         ),
         .library(
+            name: "SimUseVideo",
+            targets: ["SimUseVideo"]
+        ),
+        .library(
             name: "AndroidBackend",
             targets: ["AndroidBackend"]
         ),
@@ -100,10 +104,23 @@ let package = Package(
             // of higher targets.
             plugins: ["VersionPlugin"]
         ),
+        // Platform-neutral host-side video plumbing (H.264 parsing/muxing/
+        // encoding, frame utilities) shared by both backends. Must stay
+        // FB*-free: anything that needs FBSimulatorControl belongs in
+        // iOSSimBackend, anything adb-shaped in AndroidBackend.
+        .target(
+            name: "SimUseVideo",
+            dependencies: [
+                "SimUseCore",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
+            path: "Sources/SimUseVideo"
+        ),
         .target(
             name: "iOSSimBackend",
             dependencies: [
                 "SimUseCore",
+                "SimUseVideo",
                 "FBSimulatorControl",
                 "FBControlCore",
                 "XCTestBootstrap",
@@ -120,6 +137,7 @@ let package = Package(
             name: "AndroidBackend",
             dependencies: [
                 "SimUseCore",
+                "SimUseVideo",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
             path: "Sources/AndroidBackend",
@@ -138,6 +156,7 @@ let package = Package(
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 "SimUseCore",
+                "SimUseVideo",
                 "AndroidBackend",
                 "iOSSimBackend",
                 "FBSimulatorControl",
@@ -169,7 +188,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SimUseTests",
-            dependencies: ["SimUse", "iOSSimBackend", "SimUseCore"],
+            dependencies: ["SimUse", "iOSSimBackend", "SimUseCore", "SimUseVideo"],
             path: "Tests",
             // `Tests/` is the umbrella path; the sub-target test
             // directories below sit under it as separate testTargets.

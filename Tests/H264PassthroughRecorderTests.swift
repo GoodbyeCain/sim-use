@@ -3,7 +3,7 @@ import Testing
 import Foundation
 import AVFoundation
 import CoreMedia
-@testable import iOSSimBackend
+@testable import SimUseVideo
 
 @Suite("H264PassthroughRecorder muxing")
 struct H264PassthroughRecorderTests {

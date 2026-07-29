@@ -3,7 +3,7 @@ import Testing
 import Foundation
 import AVFoundation
 import os
-@testable import iOSSimBackend
+@testable import SimUseVideo
 
 @Suite("H264MuxingPipeline chunked ingest")
 struct H264MuxingPipelineTests {
