@@ -2,6 +2,7 @@
 import Foundation
 import Testing
 import AVFoundation
+import CoreMedia
 
 @Suite("Android Record Video Tests", .serialized, .enabled(if: isAndroidE2EEnabled))
 struct AndroidRecordVideoTests {
@@ -29,21 +30,84 @@ struct AndroidRecordVideoTests {
     @Test("recording survives a screenrecord segment restart with one continuous MP4")
     func recordAcrossSegmentRestart() async throws {
         // 2-second forced segments over a ~6 s recording guarantee at
-        // least one restart; the muxer must keep PTS continuous and the
-        // finalized file must stay loadable.
+        // least one restart. Proving the restart actually CONTRIBUTED
+        // frames needs care on two fronts:
+        //
+        //   * screenrecord is VFR and a static screen can leave a whole
+        //     segment frameless — drive screen activity for the entire
+        //     recording so every segment has real frames to deliver.
+        //   * `finish(stopHostTime:)` re-appends the last access unit at
+        //     the stop time to keep the final image visible, so duration
+        //     and isPlayable look healthy even if the muxer dropped
+        //     everything after segment 1. The discriminating assertion is
+        //     a real sample INSIDE the post-restart window (2.5–5.5 s):
+        //     segment-1 frames sit below ~2.3 s and the trailing
+        //     re-append lands at ~6 s, so only frames muxed from a later
+        //     segment can appear there.
+        let serial = try AndroidE2E.requireSerial()
+        let adbPath = try AndroidE2E.adbPath()
+        let activityDriver = Task {
+            for _ in 0..<7 {
+                if Task.isCancelled { break }
+                let swipe = Process()
+                swipe.executableURL = URL(fileURLWithPath: adbPath)
+                swipe.arguments = ["-s", serial, "shell", "input", "swipe", "300", "800", "300", "400", "200"]
+                swipe.standardOutput = Pipe()
+                swipe.standardError = Pipe()
+                try? swipe.run()
+                swipe.waitUntilExit()
+                try? await Task.sleep(nanoseconds: 600_000_000)
+            }
+        }
+        defer { activityDriver.cancel() }
+
         let result = try await recordForDuration(
             arguments: ["android", "record-video"],
             duration: 6.0,
             environment: ["SIM_USE_SCREENRECORD_TIME_LIMIT": "2"]
         )
+        activityDriver.cancel()
         defer { try? FileManager.default.removeItem(at: result.outputURL) }
 
         #expect(result.exitCode == 0, "unexpected exit \(result.exitCode); stderr: \(result.stderr)")
         #expect(result.stderr.contains("restarting"), "expected a forced segment restart, stderr: \(result.stderr)")
         try await Self.expectValidMP4(at: result.outputURL)
+
+        let asset = AVURLAsset(url: result.outputURL)
+        let playable = try await asset.load(.isPlayable)
+        #expect(playable, "restart-spanning mp4 should be playable")
+        let duration = try await asset.load(.duration).seconds
+        #expect(duration > 3.0, "expected media beyond one 2 s segment, got \(duration)s")
+
+        let samplePTS = try await Self.videoSamplePTS(of: asset)
+        #expect(samplePTS == samplePTS.sorted(), "sample PTS must be non-decreasing across segments")
+        let postRestartSamples = samplePTS.filter { $0 > 2.5 && $0 < 5.5 }
+        #expect(
+            !postRestartSamples.isEmpty,
+            "no samples in the post-restart window — later segments were not muxed. PTS: \(samplePTS.map { String(format: "%.2f", $0) })"
+        )
     }
 
     // MARK: - Helpers
+
+    /// Presentation timestamps of every video sample, read pass-through
+    /// (no decode) so assertions can see the real muxed sample layout
+    /// rather than AVAsset's summarized duration.
+    private static func videoSamplePTS(of asset: AVURLAsset) async throws -> [Double] {
+        let track = try #require(try await asset.loadTracks(withMediaType: .video).first, "mp4 has no video track")
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+        reader.add(output)
+        reader.startReading()
+        var pts: [Double] = []
+        while let sample = output.copyNextSampleBuffer() {
+            let stamp = CMSampleBufferGetPresentationTimeStamp(sample)
+            if stamp.isValid {
+                pts.append(stamp.seconds)
+            }
+        }
+        return pts
+    }
 
     private static func expectValidMP4(at url: URL) async throws {
         let asset = AVURLAsset(url: url)
