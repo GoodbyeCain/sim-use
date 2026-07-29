@@ -63,6 +63,27 @@ struct AndroidRecordVideoArgumentTests {
         #expect(!args.contains("--size"))
     }
 
+    @Test("screenrecordArguments honors the time-limit override on API 34+")
+    func timeLimitOverrideAPI34() {
+        let args = AndroidRecordVideoCommand.screenrecordArguments(serial: "emu-1", sdk: 34, bitrate: nil, size: nil, timeLimitOverride: 5)
+        #expect(args == ["-s", "emu-1", "exec-out", "screenrecord", "--output-format=h264", "--time-limit", "5", "-"])
+    }
+
+    @Test("time-limit override applies below API 34 too")
+    func timeLimitOverrideAPI33() {
+        let args = AndroidRecordVideoCommand.screenrecordArguments(serial: "emu-1", sdk: 33, bitrate: nil, size: nil, timeLimitOverride: 5)
+        #expect(args.contains("--time-limit"))
+        #expect(args.contains("5"))
+    }
+
+    @Test("screenrecordTimeLimitOverride parses the debug env var")
+    func timeLimitOverrideEnvParsing() {
+        #expect(AndroidRecordVideoCommand.screenrecordTimeLimitOverride(environment: [:]) == nil)
+        #expect(AndroidRecordVideoCommand.screenrecordTimeLimitOverride(environment: ["SIM_USE_SCREENRECORD_TIME_LIMIT": "3"]) == 3)
+        #expect(AndroidRecordVideoCommand.screenrecordTimeLimitOverride(environment: ["SIM_USE_SCREENRECORD_TIME_LIMIT": "0"]) == nil)
+        #expect(AndroidRecordVideoCommand.screenrecordTimeLimitOverride(environment: ["SIM_USE_SCREENRECORD_TIME_LIMIT": "abc"]) == nil)
+    }
+
     @Test("scaledSize halves dimensions and rounds down to even")
     func scaledSizeRounding() {
         let scaled = AndroidRecordVideoCommand.scaledSize((width: 1081, height: 2401), scale: 0.5)

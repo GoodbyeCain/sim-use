@@ -7,11 +7,10 @@ import FBSimulatorControl
 import SimUseCore
 import SimUseVideo
 
-/// iOS Simulator backend for the `stream-video` verb. iOS-only — no
-/// Android peer. The Android path used to fail-fast with a redirect
-/// to `record-video`; with path B the entire verb only exists under
-/// `sim-use ios stream-video`, so an Android caller never reaches
-/// this code path in the first place.
+/// iOS Simulator backend for the `stream-video` verb. The top-level
+/// cross-platform `StreamVideo` forwards iOS UDIDs here (#78); an
+/// Android UDID passed directly to `sim-use ios stream-video` is
+/// redirected to the surfaces that serve it.
 public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
     public enum OutputFormat: String, ExpressibleByArgument, Codable, Sendable {
         case mjpeg
@@ -67,7 +66,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
            PlatformRouter.looksLikeAndroid(arg) {
             // CLIError so the message survives our run() catch — see
             // IOSSimKeyCommand for the rationale.
-            throw CLIError(errorDescription: "stream-video is iOS-only. On Android, use `sim-use record-video --udid \(arg)` to capture an MP4 instead.")
+            throw CLIError(errorDescription: "`sim-use ios stream-video` only drives iOS simulators. For Android, use `sim-use stream-video --udid \(arg)` (or `sim-use android stream-video`).")
         }
         try device.resolve()
     }
@@ -91,19 +90,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
     }
 
     public func validate() throws {
-        try Self.validateOptions(fps: fps, quality: quality, scale: scale)
-    }
-
-    public static func validateOptions(fps: Int, quality: Int, scale: Double) throws {
-        guard fps >= 1 && fps <= 30 else {
-            throw ValidationError("FPS must be between 1 and 30")
-        }
-        guard quality >= 1 && quality <= 100 else {
-            throw ValidationError("Quality must be between 1 and 100")
-        }
-        guard scale >= 0.1 && scale <= 1.0 else {
-            throw ValidationError("Scale must be between 0.1 and 1.0")
-        }
+        try VideoRecordingOptions.validateStreaming(fps: fps, quality: quality, scale: scale)
     }
 
     public func execute() async throws -> ExecutionResult {

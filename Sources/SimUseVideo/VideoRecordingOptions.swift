@@ -19,4 +19,21 @@ public enum VideoRecordingOptions {
             throw ValidationError("Scale must be between 0.1 and 1.0")
         }
     }
+
+    /// The `stream-video` variant: streaming caps FPS at 30 (screenshot/
+    /// screencap capture cannot sustain more, and the h264 passthrough
+    /// ignores the flag entirely).
+    public static func validateStreaming(fps: Int?, quality: Int, scale: Double) throws {
+        if let fps {
+            guard fps >= 1 && fps <= 30 else {
+                throw ValidationError("FPS must be between 1 and 30")
+            }
+        }
+        guard quality >= 1 && quality <= 100 else {
+            throw ValidationError("Quality must be between 1 and 100")
+        }
+        guard scale >= 0.1 && scale <= 1.0 else {
+            throw ValidationError("Scale must be between 0.1 and 1.0")
+        }
+    }
 }

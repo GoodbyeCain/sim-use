@@ -155,7 +155,7 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
         }
     }
 
-    private static func assertAdbDeviceOnline(adb: Adb, serial: String) throws {
+    static func assertAdbDeviceOnline(adb: Adb, serial: String) throws {
         let devices: [Adb.Device]
         do {
             devices = try adb.devices()
@@ -197,7 +197,7 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
         let recordingSize = scale < 1.0 ? baseSize.map { scaledSize($0, scale: scale) } : nil
         let bitrateSize = recordingSize ?? baseSize
         let bitrate = bitrateSize.map { H264StreamRecorder.estimateBitrate(width: $0.width, height: $0.height, fps: 30, quality: quality) }
-        let arguments = screenrecordArguments(serial: serial, sdk: sdk, bitrate: bitrate, size: recordingSize)
+        let arguments = screenrecordArguments(serial: serial, sdk: sdk, bitrate: bitrate, size: recordingSize, timeLimitOverride: screenrecordTimeLimitOverride())
 
         let recorder = try H264PassthroughRecorder(outputURL: outputURL)
         var recorderFinalized = false
@@ -276,14 +276,14 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
         }
     }
 
-    private static func detectSDK(adb: Adb, serial: String) -> Int {
+    static func detectSDK(adb: Adb, serial: String) -> Int {
         guard let result = try? adb.shell(serial: serial, args: ["getprop", "ro.build.version.sdk"]) else {
             return 30
         }
         return Int(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 30
     }
 
-    private static func detectSize(adb: Adb, serial: String) -> (width: Int, height: Int)? {
+    static func detectSize(adb: Adb, serial: String) -> (width: Int, height: Int)? {
         guard let result = try? adb.shell(serial: serial, args: ["wm", "size"]) else {
             return nil
         }
@@ -318,12 +318,29 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
         return nil
     }
 
+    /// Debug override for screenrecord's per-invocation time limit
+    /// (`SIM_USE_SCREENRECORD_TIME_LIMIT`, seconds). API ≥ 34 devices
+    /// stream unlimited (`--time-limit 0`), so the segment-restart path
+    /// never fires naturally there — this forces short segments so tests
+    /// and manual runs can exercise restarts without an API < 34 device.
+    static func screenrecordTimeLimitOverride(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Int? {
+        guard let raw = environment["SIM_USE_SCREENRECORD_TIME_LIMIT"],
+              let value = Int(raw), value > 0 else {
+            return nil
+        }
+        return value
+    }
+
     /// Build the `adb screenrecord` argument vector. `--time-limit 0`
     /// (unlimited) is only valid on API ≥ 34; older devices hard-cap at 180 s,
     /// which the segment loop handles by restarting.
-    static func screenrecordArguments(serial: String, sdk: Int, bitrate: Int?, size: (width: Int, height: Int)?) -> [String] {
+    static func screenrecordArguments(serial: String, sdk: Int, bitrate: Int?, size: (width: Int, height: Int)?, timeLimitOverride: Int? = nil) -> [String] {
         var arguments = ["-s", serial, "exec-out", "screenrecord", "--output-format=h264"]
-        if sdk >= 34 {
+        if let timeLimitOverride {
+            arguments.append(contentsOf: ["--time-limit", "\(timeLimitOverride)"])
+        } else if sdk >= 34 {
             arguments.append(contentsOf: ["--time-limit", "0"])
         }
         if let bitrate {
@@ -435,7 +452,7 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
     /// while the screencap itself is the dominant cost; raising this
     /// TODO is the cheaper performance lever to reach for first when
     /// the frame loop becomes the bottleneck.
-    private static func captureAndroidScreencap(adbPath: String, serial: String) throws -> Data {
+    static func captureAndroidScreencap(adbPath: String, serial: String) throws -> Data {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: adbPath)
         process.arguments = ["-s", serial, "exec-out", "screencap", "-p"]

@@ -166,8 +166,8 @@ For Android, run `sim-use android init --device <serial>` once to install the br
 
 All device-scoped commands accept `--device <ID>` (optional when only one simulator is booted). Three command layers:
 
-  * **Top-level** — cross-platform verbs: `ui`, `tap`, `swipe`, `type`, `paste`, `button`, `gesture`, `keyboard-state`, `screenshot`, `record-video`, `app-state`. Same flags on iOS and Android.
-  * **`sim-use ios <verb>`** — iOS-only: `key`, `key-combo`, `key-sequence`, `stream-video`, `batch`.
+  * **Top-level** — cross-platform verbs: `ui`, `tap`, `swipe`, `type`, `paste`, `button`, `gesture`, `keyboard-state`, `screenshot`, `record-video`, `stream-video`, `app-state`. Same flags on iOS and Android.
+  * **`sim-use ios <verb>`** — iOS-only: `key`, `key-combo`, `key-sequence`, `batch`.
   * **`sim-use android <verb>`** — Android-only: `init`, `devices`, `ping`.
 
 Run `sim-use --help` or `sim-use <command> --help` for the full flag set.
@@ -326,12 +326,17 @@ The output path goes to stdout; progress messages go to stderr.
 ### Video streaming & recording
 
 ```bash
-# MJPEG stream (iOS-only — no Android stream-video implementation)
-sim-use ios stream-video --device $UDID --fps 10 --format mjpeg > stream.mjpeg
+# MJPEG stream (cross-platform)
+sim-use stream-video --device $UDID --fps 10 --format mjpeg > stream.mjpeg
 
 # Pipe into ffmpeg
-sim-use ios stream-video --device $UDID --fps 30 --format ffmpeg | \
+sim-use stream-video --device $UDID --fps 30 --format ffmpeg | \
   ffmpeg -f image2pipe -framerate 30 -i - -c:v libx264 -preset ultrafast out.mp4
+
+# Native H.264 live stream (Android-only): adb screenrecord passthrough —
+# variable frame rate, cheap, high quality. Preview it live in ffplay:
+sim-use stream-video --device emulator-5554 --format h264 | \
+  ffplay -f h264 -probesize 32 -fflags nobuffer -
 
 # Record MP4 directly (cross-platform)
 sim-use record-video --device $UDID --output recording.mp4            # 30 fps default
