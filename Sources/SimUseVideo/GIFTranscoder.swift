@@ -83,8 +83,15 @@ public enum GIFTranscoder {
     /// reaches the next target, and the clock then advances from the kept
     /// frame. Target accumulation (rather than distance-to-previous)
     /// keeps the *average* rate at `fps` even when source spacing beats
-    /// against the interval. Each kept frame's display delay is the gap
-    /// to its successor; the last frame holds for the nominal interval.
+    /// against the interval.
+    ///
+    /// Timing honesty is enforced in two places so the centisecond floor
+    /// never stretches playback: a frame closer than `minimumDelay` to
+    /// the previous kept frame is not selected at all (clamping it up
+    /// would owe time the GIF can't repay), and each kept frame's delay
+    /// quantizes the *cumulative* timeline to centiseconds, so per-frame
+    /// rounding carries forward instead of accumulating. The last frame
+    /// holds for the nominal interval.
     static func plan(presentationTimes: [Double], fps: Int) -> SamplingPlan {
         let sorted = presentationTimes.sorted()
         guard !sorted.isEmpty else { return SamplingPlan(timestamps: [], delays: []) }
@@ -92,20 +99,27 @@ public enum GIFTranscoder {
         let interval = 1.0 / Double(min(fps, Self.maximumFPS))
         // Quarter-frame tolerance absorbs encoder timestamp jitter when
         // the source is already at the target rate, without letting a
-        // higher-rate source sneak extra frames through.
+        // higher-rate source sneak extra frames through. The gap check
+        // gets a tighter 1 ms allowance for the same jitter.
         let epsilon = interval * 0.25
 
         var kept: [Double] = [sorted[0]]
         var nextTarget = sorted[0] + interval
-        for pts in sorted.dropFirst() where pts >= nextTarget - epsilon {
+        for pts in sorted.dropFirst()
+        where pts >= nextTarget - epsilon && pts - kept[kept.count - 1] >= Self.minimumDelay - 0.001 {
             kept.append(pts)
             nextTarget = max(nextTarget, pts) + interval
         }
 
         var delays: [Double] = []
+        var elapsed = 0.0
+        var quantized = 0.0
         for (index, pts) in kept.enumerated() {
-            let delay = index + 1 < kept.count ? kept[index + 1] - pts : interval
-            delays.append(max(delay, Self.minimumDelay))
+            elapsed += index + 1 < kept.count ? kept[index + 1] - pts : interval
+            let centiseconds = max((elapsed - quantized) * 100.0, Self.minimumDelay * 100.0).rounded()
+            let delay = centiseconds / 100.0
+            quantized += delay
+            delays.append(delay)
         }
         return SamplingPlan(timestamps: kept, delays: delays)
     }

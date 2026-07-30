@@ -61,7 +61,21 @@ struct GIFTranscoderTests {
         #expect(capped == GIFTranscoder.plan(presentationTimes: times, fps: GIFTranscoder.maximumFPS))
         // Total GIF duration stays close to the 1 s of source footage.
         let duration = capped.delays.reduce(0, +)
-        #expect(abs(duration - 1.0) < 0.1)
+        #expect(abs(duration - 1.0) <= 0.02)
+    }
+
+    @Test("High-rate sources keep wall-clock duration to centisecond tolerance", arguments: [60, 120])
+    func planPreservesWallClockAtHighSourceRates(sourceFPS: Int) {
+        // 10 s of source footage — long enough for per-frame rounding to
+        // accumulate visibly if selection or quantization loses debt
+        // (independent 2 cs clamping used to stretch this to ~10.65 s
+        // for a 60 fps source and ~10.8 s for 120 fps).
+        let times = (0..<(10 * sourceFPS)).map { Double($0) / Double(sourceFPS) }
+        let plan = GIFTranscoder.plan(presentationTimes: times, fps: 60)
+
+        #expect(plan.delays.allSatisfy { $0 >= GIFTranscoder.minimumDelay })
+        let duration = plan.delays.reduce(0, +)
+        #expect(abs(duration - 10.0) <= 0.02)
     }
 
     @Test("Empty input yields an empty plan")
