@@ -11,13 +11,30 @@ import SimUseCore
 public struct OrientationCalibration: Sendable {
     public let orientation: DisplayOrientation
     public let native: NativePortraitSize?
+    /// Metric ratio between the UI point space and the native framebuffer
+    /// point space; identity except on display-downscaled devices.
+    public let uiScale: UIPointScale
     public let probesUsed: Int
     /// Non-nil when calibration degraded to a guess (see
     /// `OrientationCalibrator` fallback rules); merge into the command's
     /// advisory slot so the caller learns taps may be off.
     public let advisory: CommandAdvisory?
 
-    public var isIdentity: Bool { orientation == .portrait }
+    public init(
+        orientation: DisplayOrientation,
+        native: NativePortraitSize?,
+        uiScale: UIPointScale = .identity,
+        probesUsed: Int,
+        advisory: CommandAdvisory?
+    ) {
+        self.orientation = orientation
+        self.native = native
+        self.uiScale = uiScale
+        self.probesUsed = probesUsed
+        self.advisory = advisory
+    }
+
+    public var isIdentity: Bool { orientation == .portrait && uiScale.isIdentity }
 
     public func hidPoint(x: Double, y: Double) -> (x: Double, y: Double) {
         let p = hidCGPoint(CGPoint(x: x, y: y))
@@ -25,14 +42,29 @@ public struct OrientationCalibration: Sendable {
     }
 
     public func hidCGPoint(_ p: CGPoint) -> CGPoint {
-        guard let native, orientation != .portrait else { return p }
-        return orientation.uiToFramebuffer(p, native: native)
+        guard let native, !isIdentity else { return p }
+        return orientation.uiToFramebuffer(p, native: native, uiScale: uiScale)
+    }
+
+    /// The UI-space screen size for the calibrated orientation.
+    public func uiScreenSize() -> (width: Double, height: Double)? {
+        native.map { orientation.uiSize(native: $0, uiScale: uiScale) }
     }
 
     /// Zero-probe identity result for surfaces that opt out (Android
     /// reshapes, tests) or cannot calibrate at all.
-    public static func identity(native: NativePortraitSize? = nil, advisory: CommandAdvisory? = nil) -> OrientationCalibration {
-        OrientationCalibration(orientation: .portrait, native: native, probesUsed: 0, advisory: advisory)
+    public static func identity(
+        native: NativePortraitSize? = nil,
+        uiScale: UIPointScale = .identity,
+        advisory: CommandAdvisory? = nil
+    ) -> OrientationCalibration {
+        OrientationCalibration(
+            orientation: .portrait,
+            native: native,
+            uiScale: uiScale,
+            probesUsed: 0,
+            advisory: advisory
+        )
     }
 
     /// Wraps a hit-test probe so UI-space probe points cross into the
@@ -87,9 +119,21 @@ public enum OrientationCalibrator {
             ))
         }
 
-        var candidates = orderedCandidates(native: native, uiScreenSize: uiScreenSize, hint: hint)
+        let uiScale = uiPointScale(native: native, uiScreenSize: uiScreenSize ?? hint)
+        var candidates = orderedCandidates(
+            native: native,
+            uiScale: uiScale,
+            uiScreenSize: uiScreenSize,
+            hint: hint
+        )
         if candidates.count == 1, let only = candidates.first {
-            return OrientationCalibration(orientation: only, native: native, probesUsed: 0, advisory: nil)
+            return OrientationCalibration(
+                orientation: only,
+                native: native,
+                uiScale: uiScale,
+                probesUsed: 0,
+                advisory: nil
+            )
         }
         // Nil-probe demotion below reorders `candidates` to diversify the
         // next probe, but that is weak evidence — the ambiguity fallback
@@ -108,8 +152,10 @@ public enum OrientationCalibrator {
             else { continue }
 
             let center = CGPoint(x: rect.midX, y: rect.midY)
-            let framebufferPoint = lead.uiToFramebuffer(center, native: native)
-            let projections = candidates.map { $0.framebufferToUI(framebufferPoint, native: native) }
+            let framebufferPoint = lead.uiToFramebuffer(center, native: native, uiScale: uiScale)
+            let projections = candidates.map {
+                $0.framebufferToUI(framebufferPoint, native: native, uiScale: uiScale)
+            }
 
             // A probe can only discriminate when at least two candidates
             // project this framebuffer point to places farther apart than
@@ -131,7 +177,9 @@ public enum OrientationCalibrator {
 
             let expanded = hitFrame.insetBy(dx: -containmentSlack, dy: -containmentSlack)
             let retained = candidates.filter { candidate in
-                expanded.contains(candidate.framebufferToUI(framebufferPoint, native: native))
+                expanded.contains(
+                    candidate.framebufferToUI(framebufferPoint, native: native, uiScale: uiScale)
+                )
             }
             // Empty: inconsistent hit; full: a frame fat enough to cover
             // every projection (wrapper view). Neither narrows anything —
@@ -146,7 +194,13 @@ public enum OrientationCalibrator {
 
         if candidates.count == 1, let winner = candidates.first {
             logger.debug().log("OrientationCalibrator: \(winner.rawValue) confirmed in \(probesUsed) probe(s)")
-            return OrientationCalibration(orientation: winner, native: native, probesUsed: probesUsed, advisory: nil)
+            return OrientationCalibration(
+                orientation: winner,
+                native: native,
+                uiScale: uiScale,
+                probesUsed: probesUsed,
+                advisory: nil
+            )
         }
 
         // Ambiguous. Guess the highest-prior surviving candidate rather
@@ -160,6 +214,7 @@ public enum OrientationCalibrator {
         return OrientationCalibration(
             orientation: guess,
             native: native,
+            uiScale: uiScale,
             probesUsed: probesUsed,
             advisory: CommandAdvisory(
                 kind: .orientationCalibrationFallback,
@@ -232,18 +287,50 @@ public enum OrientationCalibrator {
         )
     }
 
+    // MARK: - UI metric
+
+    /// A downscaled panel is one uniform factor, so both axis ratios agree
+    /// to within a pixels/scale rounding error.
+    nonisolated static let maxUIMetricSkew = 0.005
+    /// Shipping downscales sit at 0.96 (12/13 mini) and 0.87 (Plus); a
+    /// ratio outside this band is not a panel, it is a bad screen size.
+    nonisolated static let uiMetricBand = 0.8...1.25
+
+    /// Rotation swaps the reported screen dimensions but never changes the
+    /// two numbers, so sorting recovers the portrait-major UI size without
+    /// knowing the orientation yet — which is what the scale needs, since
+    /// resolving the orientation is what it is about to help with.
+    ///
+    /// Falls back to identity unless the ratio looks like a real panel
+    /// downscale: a UI size that is a window rather than the display (a
+    /// resized iPad scene) would otherwise skew every coordinate.
+    nonisolated static func uiPointScale(
+        native: NativePortraitSize,
+        uiScreenSize: (width: Double, height: Double)?
+    ) -> UIPointScale {
+        guard let size = uiScreenSize else { return .identity }
+        let portrait = (width: min(size.width, size.height), height: max(size.width, size.height))
+        guard let scale = UIPointScale(native: native, uiPortrait: portrait),
+              uiMetricBand.contains(scale.x), uiMetricBand.contains(scale.y),
+              abs(scale.x - scale.y) <= maxUIMetricSkew
+        else { return .identity }
+        return scale
+    }
+
     // MARK: - Candidate ordering
 
     private static func orderedCandidates(
         native: NativePortraitSize,
+        uiScale: UIPointScale,
         uiScreenSize: (width: Double, height: Double)?,
         hint: (width: Double, height: Double)?
     ) -> [DisplayOrientation] {
         if let size = uiScreenSize {
-            if matches(size, width: native.width, height: native.height) {
+            let portrait = DisplayOrientation.portrait.uiSize(native: native, uiScale: uiScale)
+            if matches(size, width: portrait.width, height: portrait.height) {
                 return [.portrait, .portraitUpsideDown]
             }
-            if matches(size, width: native.height, height: native.width) {
+            if matches(size, width: portrait.height, height: portrait.width) {
                 return [.landscapeRight, .landscapeLeft]
             }
         }
@@ -252,7 +339,7 @@ public enum OrientationCalibrator {
         // The hint (e.g. snapshot dims) is stale by definition — use it
         // only to probe the consistent candidates first.
         let preferred = all.filter { orientation in
-            let size = orientation.uiSize(native: native)
+            let size = orientation.uiSize(native: native, uiScale: uiScale)
             return matches(hint, width: size.width, height: size.height)
         }
         return preferred + all.filter { !preferred.contains($0) }
