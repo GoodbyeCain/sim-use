@@ -4,8 +4,10 @@ import Foundation
 
 /// The simulator's native screen size in points — the coordinate space the
 /// HID layer normalizes against (`FBSimulatorIndigoHID` divides by
-/// `deviceType.mainScreenSize` pixels), and the space AX point hit-tests
-/// are interpreted in. iOS devices report this portrait-major.
+/// `deviceType.mainScreenSize` pixels). AX point hit-tests share these
+/// AXES (native portrait) but not the metric — see
+/// ``NativePortraitSize/uiMetric(_:)``. iOS devices report this
+/// portrait-major.
 public struct NativePortraitSize: Equatable, Sendable {
     public let width: Double
     public let height: Double
@@ -25,6 +27,19 @@ public struct NativePortraitSize: Equatable, Sendable {
         else { return nil }
         self.width = Double(screenInfo.widthPixels) / Double(screenInfo.scale)
         self.height = Double(screenInfo.heightPixels) / Double(screenInfo.scale)
+    }
+
+    /// The same portrait rectangle expressed in the UI point metric —
+    /// the canvas AX point hit-tests are interpreted on. The hit-test
+    /// XPC shares HID's native-portrait axes but consumes UI-metric
+    /// points (verified live on iPhone 12 mini / iOS 26.4: the un-scaled
+    /// UI point returns the element at that point; the pixels/scale-
+    /// shrunk point lands ~4% off). Identity scale returns `self`, so
+    /// devices that render 1:1 are untouched.
+    public func uiMetric(_ scale: UIPointScale) -> NativePortraitSize {
+        scale.isIdentity
+            ? self
+            : NativePortraitSize(width: width / scale.x, height: height / scale.y)
     }
 }
 

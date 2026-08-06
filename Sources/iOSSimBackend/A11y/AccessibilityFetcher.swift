@@ -256,6 +256,13 @@ public struct AccessibilityFetcher {
     /// tie (a fat frame containing several projections proves nothing)
     /// falls through to a full tree calibration — giving portrait the tie
     /// would return the wrong element on rotated devices.
+    ///
+    /// The hit-test consumes UI-METRIC points on native-portrait axes
+    /// (verified live on a display-downscaled iPhone 12 mini — see
+    /// `NativePortraitSize.uiMetric`), so in portrait the identity probe
+    /// queries the exact requested point on every device, downscaled or
+    /// not, and the fast path stays single-probe. Only the HID dispatch
+    /// side of a calibration carries the `UIPointScale`.
     private static func pointQuery(
         target: FBSimulator,
         point: AccessibilityPoint,
@@ -324,10 +331,16 @@ public struct AccessibilityFetcher {
         )
 
         let info: AnyObject
+        // The hit-test consumes UI-METRIC points on native-portrait
+        // axes, so the portrait probe transform is the identity even on
+        // display-downscaled devices — the identity probe already
+        // queried the right point and its result is reusable. Rotated
+        // devices re-issue through `probeCGPoint` (axes only, never the
+        // HID metric scale).
         if resolved == .portrait, let identityResult {
             info = identityResult
         } else {
-            info = try await nestedQuery(finalCalibration.hidCGPoint(point.cgPoint))
+            info = try await nestedQuery(finalCalibration.probeCGPoint(point.cgPoint))
             perf.stage("point XPC (transformed)")
         }
         let data = try serializeAccessibilityInfo(info)

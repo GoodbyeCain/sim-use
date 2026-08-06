@@ -46,6 +46,18 @@ public struct OrientationCalibration: Sendable {
         return orientation.uiToFramebuffer(p, native: native, uiScale: uiScale)
     }
 
+    /// UI point → AX point-hit-test coordinate. The hit-test shares
+    /// HID's native-portrait AXES but consumes points in the UI point
+    /// METRIC (see ``NativePortraitSize/uiMetric(_:)``), so this rotates
+    /// on the UI-sized canvas and never applies the HID metric scale.
+    /// Portrait is always the identity — even on display-downscaled
+    /// devices — which is what keeps the single-probe fast paths valid
+    /// there.
+    public func probeCGPoint(_ p: CGPoint) -> CGPoint {
+        guard let native, orientation != .portrait else { return p }
+        return orientation.uiToFramebuffer(p, native: native.uiMetric(uiScale))
+    }
+
     /// The UI-space screen size for the calibrated orientation.
     public func uiScreenSize() -> (width: Double, height: Double)? {
         native.map { orientation.uiSize(native: $0, uiScale: uiScale) }
@@ -67,13 +79,14 @@ public struct OrientationCalibration: Sendable {
         )
     }
 
-    /// Wraps a hit-test probe so UI-space probe points cross into the
-    /// framebuffer space the hit-test consumes; identity returns the
-    /// probe unchanged (the exact pre-fix closure).
+    /// Wraps a hit-test probe so UI-space probe points cross onto the
+    /// hit-test's native-portrait axes; portrait returns the probe
+    /// unchanged (the exact pre-fix closure) — the probe transform is
+    /// the identity there regardless of the HID metric scale.
     public func wrappedProbe(
         _ probe: @escaping OrientationCalibrator.HitTestProbe
     ) -> OrientationCalibrator.HitTestProbe {
-        isIdentity ? probe : { try await probe(self.hidCGPoint($0)) }
+        orientation == .portrait ? probe : { try await probe(self.probeCGPoint($0)) }
     }
 }
 
@@ -141,7 +154,13 @@ public enum OrientationCalibrator {
         // be demoted last.
         let priorOrder = candidates
 
-        let screenArea = native.width * native.height
+        // Probes ride the hit-test, whose axes are native-portrait but
+        // whose METRIC is the UI point space — so every probe transform
+        // runs on the UI-sized canvas without the HID scale (see
+        // `OrientationCalibration.probeCGPoint`). Discriminator rects are
+        // UI-space, hence the area gate uses the same canvas.
+        let probeCanvas = native.uiMetric(uiScale)
+        let screenArea = probeCanvas.width * probeCanvas.height
         var probesUsed = 0
 
         for rect in discriminators {
@@ -152,9 +171,9 @@ public enum OrientationCalibrator {
             else { continue }
 
             let center = CGPoint(x: rect.midX, y: rect.midY)
-            let framebufferPoint = lead.uiToFramebuffer(center, native: native, uiScale: uiScale)
+            let probePoint = lead.uiToFramebuffer(center, native: probeCanvas)
             let projections = candidates.map {
-                $0.framebufferToUI(framebufferPoint, native: native, uiScale: uiScale)
+                $0.framebufferToUI(probePoint, native: probeCanvas)
             }
 
             // A probe can only discriminate when at least two candidates
@@ -165,7 +184,7 @@ public enum OrientationCalibrator {
             guard hasSeparatedPair(projections, minSeparation: minSeparation) else { continue }
 
             probesUsed += 1
-            guard let hit = try? await probe(framebufferPoint),
+            guard let hit = try? await probe(probePoint),
                   let hitFrame = frameRect(of: hit)
             else {
                 // Under the true orientation this point should have hit the
@@ -178,7 +197,7 @@ public enum OrientationCalibrator {
             let expanded = hitFrame.insetBy(dx: -containmentSlack, dy: -containmentSlack)
             let retained = candidates.filter { candidate in
                 expanded.contains(
-                    candidate.framebufferToUI(framebufferPoint, native: native, uiScale: uiScale)
+                    candidate.framebufferToUI(probePoint, native: probeCanvas)
                 )
             }
             // Empty: inconsistent hit; full: a frame fat enough to cover
@@ -396,21 +415,28 @@ public enum OrientationCalibrator {
         return false
     }
 
-    /// The single orientation under which `framebufferPoint` projects
-    /// into `hitFrame` (± `containmentSlack`), or nil when zero or
-    /// several orientations do. An ambiguous hit must not pick a winner:
-    /// the `--point` fast path used to give portrait the tie, so on a
+    /// The single orientation under which `probePoint` projects into
+    /// `hitFrame` (± `containmentSlack`), or nil when zero or several
+    /// orientations do. An ambiguous hit must not pick a winner: the
+    /// `--point` fast path used to give portrait the tie, so on a
     /// rotated device a raw hit landing on a large frame confidently
     /// returned the wrong element as `orientation: portrait` with no
     /// advisory.
+    ///
+    /// Runs before any `UIPointScale` is known, so the non-portrait
+    /// projections use the native canvas — on a display-downscaled
+    /// device they carry up to ~4% error, which can only make this MORE
+    /// conservative (a missed containment falls through to the full
+    /// tree calibration). The portrait projection is the identity and
+    /// exact everywhere.
     nonisolated static func soleOrientation(
-        mapping framebufferPoint: CGPoint,
+        mapping probePoint: CGPoint,
         into hitFrame: CGRect,
         native: NativePortraitSize
     ) -> DisplayOrientation? {
         let expanded = hitFrame.insetBy(dx: -containmentSlack, dy: -containmentSlack)
         let contained = DisplayOrientation.allCases.filter {
-            expanded.contains($0.framebufferToUI(framebufferPoint, native: native))
+            expanded.contains($0.framebufferToUI(probePoint, native: native))
         }
         return contained.count == 1 ? contained.first : nil
     }
