@@ -82,10 +82,6 @@ struct PointQueryOrientationTests {
     }
 }
 
-// On a display-downscaled device the identity probe queries ~4% off
-// target, so the fast path must NOT settle portrait from it — the query
-// has to fall through to tree calibration, which recovers the
-// `UIPointScale` and re-issues the hit-test through the scaled mapping.
 // iPhone 12 mini: UI space 375x812, pixels / scale 360x780. The AX
 // hit-test consumes UI-METRIC points on native-portrait AXES (verified
 // live on iOS 26.4: querying the un-scaled UI point returns the element

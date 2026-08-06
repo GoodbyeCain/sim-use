@@ -7,10 +7,12 @@ import Testing
 // MARK: - Fixture helpers
 //
 // A mock "screen" is a list of labeled UI-space rects plus a ground-truth
-// orientation. The probe receives a framebuffer point (exactly what the
-// real AX hit-test consumes), maps it through the ground truth, and
-// returns the first fixture rect containing the mapped point — i.e. it
+// orientation. The probe receives a point on the hit-test's native-
+// portrait AXES; on this 1:1 fixture the UI and pixels/scale metrics
+// coincide, so mapping through the ground truth on the native canvas
 // behaves exactly like the device did during the issue #34 verification.
+// (Downscaled devices, where the metrics diverge, are pinned separately
+// below.)
 
 private let iPadNative = NativePortraitSize(width: 834, height: 1210)
 
