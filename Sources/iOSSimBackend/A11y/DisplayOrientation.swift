@@ -4,8 +4,10 @@ import Foundation
 
 /// The simulator's native screen size in points — the coordinate space the
 /// HID layer normalizes against (`FBSimulatorIndigoHID` divides by
-/// `deviceType.mainScreenSize` pixels), and the space AX point hit-tests
-/// are interpreted in. iOS devices report this portrait-major.
+/// `deviceType.mainScreenSize` pixels). AX point hit-tests share these
+/// AXES (native portrait) but not the metric — see
+/// ``NativePortraitSize/uiMetric(_:)``. iOS devices report this
+/// portrait-major.
 public struct NativePortraitSize: Equatable, Sendable {
     public let width: Double
     public let height: Double
@@ -25,6 +27,19 @@ public struct NativePortraitSize: Equatable, Sendable {
         else { return nil }
         self.width = Double(screenInfo.widthPixels) / Double(screenInfo.scale)
         self.height = Double(screenInfo.heightPixels) / Double(screenInfo.scale)
+    }
+
+    /// The same portrait rectangle expressed in the UI point metric —
+    /// the canvas AX point hit-tests are interpreted on. The hit-test
+    /// XPC shares HID's native-portrait axes but consumes UI-metric
+    /// points (verified live on iPhone 12 mini / iOS 26.4: the un-scaled
+    /// UI point returns the element at that point; the pixels/scale-
+    /// shrunk point lands ~4% off). Identity scale returns `self`, so
+    /// devices that render 1:1 are untouched.
+    public func uiMetric(_ scale: UIPointScale) -> NativePortraitSize {
+        scale.isIdentity
+            ? self
+            : NativePortraitSize(width: width / scale.x, height: height / scale.y)
     }
 }
 
@@ -65,10 +80,13 @@ public struct UIPointScale: Equatable, Sendable {
 /// The app's interface orientation relative to the native framebuffer.
 ///
 /// AX element frames arrive in the app UI space (they rotate with the
-/// interface); HID taps and AX point hit-tests are interpreted in the
-/// fixed native framebuffer space. These are the four possible mappings,
-/// measured empirically on iOS 26.5 (issue #34) with native portrait
-/// W×H points and framebuffer point `f` ↔ UI point `u`:
+/// interface); HID taps and AX point hit-tests are interpreted on the
+/// fixed native-portrait AXES — though in different metrics: HID
+/// normalizes against pixels/scale while the hit-test keeps the UI
+/// point metric (identical on 1:1 devices; see
+/// ``NativePortraitSize/uiMetric(_:)``). These are the four possible
+/// axis mappings, measured empirically on iOS 26.5 (issue #34) with
+/// portrait W×H points and portrait-axis point `f` ↔ UI point `u`:
 ///
 ///     portrait             u = f
 ///     portraitUpsideDown   u = (W−fx, H−fy)
@@ -129,8 +147,11 @@ public enum DisplayOrientation: String, CaseIterable, Codable, Sendable {
         return clamp(intoUIMetric(mapped, uiScale: uiScale), width: ui.width, height: ui.height)
     }
 
-    /// UI point → framebuffer point (the coordinate to hand to HID or a
-    /// point hit-test).
+    /// UI point → native-portrait axes. With the calibrated `uiScale`,
+    /// this is the coordinate to hand to HID; a point hit-test instead
+    /// takes the identity scale on the UI-sized canvas (see
+    /// `OrientationCalibration.probeCGPoint`) because it keeps the UI
+    /// metric.
     public func uiToFramebuffer(
         _ p: CGPoint,
         native: NativePortraitSize,
