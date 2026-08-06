@@ -49,8 +49,9 @@ screenshots all share one rotated screen space (verified live in landscape).
 
 ### Measured transforms
 
-With native portrait size W×H in points, framebuffer point `f` ↔ UI point `u`
-(measured empirically on iOS 26.5, iPad Pro 11" M5, 834×1210):
+With portrait size W×H in points, portrait-axis point `f` ↔ UI point `u`
+(measured empirically on iOS 26.5, iPad Pro 11" M5, 834×1210 — a 1:1 device,
+so the axis mapping below is metric-agnostic):
 
 ```
 portrait               u = f
@@ -101,10 +102,11 @@ directly:
 2. **Probe.** Take a known element whose frame is far from the screen center
    (center-symmetric points project onto themselves under every mapping and
    discriminate nothing). Assume the leading candidate, inverse-transform the
-   element's center into a framebuffer point, and hit-test it. The returned
-   frame yields containment evidence against **all** remaining candidates at
-   once (`retain T where frame ∋ T.framebufferToUI(probePoint)`), so the
-   common cases — portrait and 180° — resolve in **one probe**.
+   element's center into a hit-test canvas point (portrait axes, UI metric —
+   since PR #92 explicitly on the UI-sized canvas), and hit-test it. The
+   returned frame yields containment evidence against **all** remaining
+   candidates at once (`retain T where frame ∋ T.framebufferToUI(probePoint)`),
+   so the common cases — portrait and 180° — resolve in **one probe**.
 3. **Uninformative results** (full-screen wrapper hit, nil) rotate the leading
    assumption and move to the next discriminator; budget capped at 3 probes.
 4. **Failure degrades safely**: fall back to the highest-prior surviving
