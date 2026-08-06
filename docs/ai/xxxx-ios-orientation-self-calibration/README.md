@@ -3,6 +3,19 @@
 Work record for the investigation and fix of issue #34 — "iOS tap coordinates
 are wrong when app orientation and Simulator window rotation differ".
 
+> **Update (2026-08, PR #90 / #92):** the "hit-test space == HID space"
+> premise below holds for **axes only**. On display-downscaled devices
+> (iPhone 12/13 mini, the 6/6s/7/8 Plus family) the two consumers diverge in
+> **metric**: the AX hit-test keeps the UI point metric (375×812 on the mini)
+> while HID normalizes against pixels/scale (360×780) — verified live on an
+> iPhone 12 mini / iOS 26.4 with discriminating probes. The metrics coincide
+> on devices that render 1:1, which is why the #34-era experiments below
+> could not distinguish them. Probe traffic and HID dispatch therefore ride
+> separate transforms since PR #92: `OrientationCalibration.probeCGPoint`
+> (axes only, on the UI-sized canvas — `NativePortraitSize.uiMetric`) vs
+> `hidCGPoint` (axes + `UIPointScale`). Statements below are corrected where
+> they would otherwise mislead; the original measurements stand.
+
 ## Problem
 
 Three coordinate spaces coexist on the iOS Simulator, and sim-use conflated
@@ -12,7 +25,7 @@ them:
 |---|---|---|
 | AX element frames (`element.accessibilityFrame` via the idb bridge) | app UI space | yes |
 | HID touch events (`FBSimulatorIndigoHID` normalizes by the fixed `deviceType.mainScreenSize`) | device-native portrait framebuffer | no |
-| AX point hit-test input (`accessibilityElementForPoint:`) | device-native portrait framebuffer | no |
+| AX point hit-test input (`accessibilityElementForPoint:`) | native-portrait axes, UI point metric (PR #92) | no |
 | Screenshots (`takeScreenshot`) | raw framebuffer | no |
 
 No transform existed between them, so every AX-derived coordinate was handed
@@ -76,8 +89,10 @@ the gap exists upstream.
 
 ## Decision: self-calibration
 
-The AX hit-test shares the HID input space (verified empirically), so instead
-of *querying* the orientation we *measure* the mapping directly:
+The AX hit-test shares the HID input **axes** (verified empirically; the
+metrics also coincide on the 1:1 devices used here — see the update note at
+the top), so instead of *querying* the orientation we *measure* the mapping
+directly:
 
 1. **Prune candidates** by comparing the AX Application-root size against the
    native portrait size (from `FBSimulator.screenInfo`, pixels ÷ scale):
@@ -112,7 +127,8 @@ New files:
   `framebufferToUI` / `uiSize`, edge clamping to `[0, limit)`).
 - `Sources/iOSSimBackend/A11y/OrientationCalibrator.swift` — the
   candidate-elimination calibrator (injectable probe closure for tests),
-  `OrientationCalibration` (carries `hidPoint(x:y:)`), `AXProbeSession`
+  `OrientationCalibration` (carries `hidPoint(x:y:)` for HID dispatch and,
+  since PR #92, `probeCGPoint` for hit-test traffic), `AXProbeSession`
   (one-time simulator lookup → probe + native size), snapshot-based and
   tree-based convenience entry points.
 
@@ -120,7 +136,7 @@ Integration points (transform applies to AX-derived coordinates **only**):
 
 | Path | Change |
 |---|---|
-| `AccessibilityFetcher` tree fetch | Calibrates after the XPC fetch; wraps the quadtree probe as `probe(calibration.hidCGPoint($0))` when non-identity. `CollapsedChildrenRecovery` internals untouched (its bookkeeping is consistently UI-space). |
+| `AccessibilityFetcher` tree fetch | Calibrates after the XPC fetch; wraps the quadtree probe via `calibration.wrappedProbe(...)` (→ `probeCGPoint`, axes only — never the HID metric scale) when rotated. `CollapsedChildrenRecovery` internals untouched (its bookkeeping is consistently UI-space). |
 | `describe-ui --point` | Input redefined as **UI space** (the space printed frames use). The first probe doubles as calibration evidence; a tree-fetch calibration only runs when inconclusive. Also: `--point` no longer overwrites the `@N` alias snapshot (pre-existing footgun found during verification). |
 | `tap @N` / `#N` (snapshot alias) | `OutlineAliasResolver.resolveWithPayload` exposes the matched entry + payload; calibration uses the tapped entry as the first discriminator (the confirming probe lands on the element about to be tapped). Mismatched snapshot dims emit a stale-snapshot advisory. |
 | `tap #<id>` / `--label` family | New `AccessibilityPoller.resolveWithPollingHIDTarget` returns `{ui, hid, calibration, advisory}` from the same fetch that resolved the element. All dispatch shapes transformed: `tapAt`, duration down/up, two-finger (both fingers). |
@@ -167,6 +183,11 @@ still emit the raw framebuffer orientation.
   app.
 - **Screenshot rotation** to match the UI orientation (agents comparing
   screenshots against outline coordinates still see rotated pixels).
-- The measured transform table assumes the hit-test space equals the HID
+- ~~The measured transform table assumes the hit-test space equals the HID
   space; if a future Xcode changes either side, the calibrator keeps working
-  (it measures, not assumes) but the screenshot follow-up should re-verify.
+  (it measures, not assumes) but the screenshot follow-up should re-verify.~~
+  **Resolved (2026-08, PR #90 / #92):** the two sides did turn out to differ —
+  in metric, on display-downscaled devices (the axes assumption held). Probe
+  and HID traffic now ride separate transforms; see the update note at the
+  top. The calibrator's measure-don't-assume design is what kept portrait
+  taps and probes self-consistent in the interim.

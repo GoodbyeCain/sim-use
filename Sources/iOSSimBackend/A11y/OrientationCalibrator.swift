@@ -95,10 +95,11 @@ public struct OrientationCalibration: Sendable {
 }
 
 /// Determines the current interface orientation by probing the AX
-/// hit-test, which shares the HID coordinate space (issue #34): probe a
-/// framebuffer point derived from a known element under a candidate
-/// orientation, and keep the candidates whose mapping puts the probe
-/// point inside the returned element's UI frame.
+/// hit-test, which shares the HID coordinate AXES (issue #34; the metric
+/// stays UI — see `probeCGPoint`): probe a portrait-axes point derived
+/// from a known element under a candidate orientation, and keep the
+/// candidates whose mapping puts the probe point inside the returned
+/// element's UI frame.
 ///
 /// No public or private simulator API exposes a queryable orientation,
 /// and the AX-reported screen size alone cannot separate 0° from 180°

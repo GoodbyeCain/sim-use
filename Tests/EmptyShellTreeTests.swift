@@ -168,9 +168,9 @@ struct RemoteContentSamplingRegionTests {
 
 // The retry request must NOT enable the frame-coverage grid. The grid
 // is created and filled with UI-space frames while its isFilled gate
-// consumes the retry's framebuffer-space sample points — under rotation
+// consumes the retry's portrait-axes sample points — under rotation
 // a discovered element's UI frame shadows a numerically-overlapping but
-// visually unrelated framebuffer band, skipping later sample points.
+// visually unrelated portrait-axes band, skipping later sample points.
 // And on the only path that runs discovery (an empty shell), the gate's
 // upside is zero anyway: the grid starts empty, so it can never save a
 // probe — it can only mis-skip one.
