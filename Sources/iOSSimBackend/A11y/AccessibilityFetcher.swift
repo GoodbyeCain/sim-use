@@ -278,8 +278,8 @@ public struct AccessibilityFetcher {
     // MARK: - Point query (UI-space semantics)
 
     /// `--point` coordinates are UI space — the space every printed frame
-    /// uses. The hit-test XPC consumes framebuffer points, so a rotated
-    /// device needs the query transformed. The first probe doubles as
+    /// uses. The hit-test XPC consumes points on native-portrait axes,
+    /// so a rotated device needs the query transformed. The first probe doubles as
     /// calibration evidence: its returned frame settles the orientation
     /// only when exactly one candidate maps the probe point into it. Any
     /// tie (a fat frame containing several projections proves nothing)

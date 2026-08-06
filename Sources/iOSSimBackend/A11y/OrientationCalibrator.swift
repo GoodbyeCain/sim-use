@@ -5,9 +5,13 @@ import FBSimulatorControl
 import Foundation
 import SimUseCore
 
-/// Result of an orientation self-calibration. `hidPoint` is the one entry
-/// point AX-derived coordinates must pass through before reaching HID or
-/// a point hit-test; explicit user coordinates (`-x/-y`) never do.
+/// Result of an orientation self-calibration. AX-derived coordinates
+/// must pass through exactly one of two entry points: `hidPoint` before
+/// reaching HID dispatch, `probeCGPoint` before reaching a point
+/// hit-test — the two spaces share native-portrait AXES but the
+/// hit-test keeps the UI point METRIC while HID normalizes against
+/// pixels/scale. Explicit user coordinates (`-x/-y`) never pass through
+/// either.
 public struct OrientationCalibration: Sendable {
     public let orientation: DisplayOrientation
     public let native: NativePortraitSize?
