@@ -1,6 +1,6 @@
 ---
 name: sim-use
-description: Drive iOS Simulator and Android emulator/device screens for AI agents. Use when asked to automate a simulator or emulator, tap/swipe/type on a device, describe UI, take a screenshot, or interact with a mobile app.
+description: Drive iOS Simulator, Android emulator/device, and physical iPhone/iPad screens for AI agents. Use when asked to automate a simulator or emulator, drive a real iOS device, tap/swipe/type on a device, describe UI, take a screenshot, or interact with a mobile app.
 ---
 
 ## 0. Preflight
@@ -83,6 +83,26 @@ Every byte of command output you read costs context. Defaults that keep the loop
 | Pinch zoom in | `sim-use gesture pinch-out --device <UDID>` (two-finger spread) |
 | Rotate | `sim-use gesture rotate-cw --angle 90 --device <UDID>` |
 | Record evidence GIF | `sim-use record-video --output demo.gif --device <UDID>` — stop with SIGINT/SIGTERM (never SIGKILL); transcodes after stop; auto-plays inline in PRs |
+
+### Physical iOS devices (experimental)
+
+A connected iPhone or iPad uses a **separate command surface**, `sim-use ios-device`. The top-level verbs do not route to it.
+
+```bash
+sim-use ios-device devices          # UDID or ECID; --device optional when one is attached
+sim-use ios-device ui               # outline of the foreground app
+sim-use ios-device ui --fast        # ~40% quicker, ~25% fewer elements
+sim-use ios-device tap --text "Friends"
+```
+
+The loop is observe → act → verify as usual, but four things differ and they change how you drive it:
+
+1. **The device must be unlocked.** Locked looks like success: the connection is accepted and then every element query comes back empty.
+2. **Tap by text, not by alias.** Element handles die with the connection, so `@N` from a previous `ui` is meaningless. `tap --text` re-resolves the target inside one session.
+3. **No coordinates.** There is no frame data, so no coordinate tap, `swipe`, `gesture` or `multi-touch`. Reach things by activating them; scrolling and app-defined swipe actions are accessibility actions here.
+4. **Budget seconds, not milliseconds.** A full tree is a few seconds — the device serialises the requests. Don't poll it in a tight loop.
+
+Everything else (`screenshot`, `record-video`, the simulator verbs) is unavailable on this surface for now.
 
 ## 2. Pitfalls
 

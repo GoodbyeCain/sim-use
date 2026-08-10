@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `sim-use ios-device` (experimental): drive a **physical** iPhone or iPad. `devices` lists attached devices, `ui` prints an outline of the foreground app's accessibility tree, and `tap --text` activates a matching element. The device is reached through its accessibility audit daemon over usbmux lockdown, so nothing is installed on it, nothing is code signed, and no Developer Disk Image is needed — but the device must be unlocked. This channel exposes no element geometry, so there is no coordinate tap, swipe or gesture: interaction goes through accessibility actions, and the outline is ordered by the accessibility reading order rather than by screen position.
+
 ## [0.13.0] - 2026-08-06
 
 ### Added

@@ -48,7 +48,7 @@ let privateModuleMapFlags: [String] = ["-Xcc", "-I\(privateHeadersDir)"] + [
 }
 
 let fbLinkerFlags: [String] = [
-    "FBControlCore", "FBSimulatorControl", "XCTestBootstrap",
+    "FBControlCore", "FBSimulatorControl", "XCTestBootstrap", "FBDeviceControl",
 ].flatMap {
     [
         "-Xlinker", "-force_load",
@@ -86,6 +86,10 @@ let package = Package(
         .library(
             name: "iOSSimBackend",
             targets: ["iOSSimBackend"]
+        ),
+        .library(
+            name: "iOSDeviceBackend",
+            targets: ["iOSDeviceBackend"]
         ),
     ],
     dependencies: [
@@ -133,6 +137,20 @@ let package = Package(
             ],
             plugins: ["VersionPlugin"]
         ),
+        // Physical iOS devices, driven over the accessibility audit daemon
+        // (usbmux lockdown -> DTX). No XCUITest runner, so no code signing and
+        // no Developer Disk Image — but also no element geometry, which is why
+        // this target does not share iOSSimBackend's frame-based machinery.
+        .target(
+            name: "iOSDeviceBackend",
+            dependencies: [
+                "SimUseCore",
+                "FBDeviceControl",
+                "FBControlCore",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
+            path: "Sources/iOSDeviceBackend"
+        ),
         .target(
             name: "AndroidBackend",
             dependencies: [
@@ -159,9 +177,11 @@ let package = Package(
                 "SimUseVideo",
                 "AndroidBackend",
                 "iOSSimBackend",
+                "iOSDeviceBackend",
                 "FBSimulatorControl",
                 "FBControlCore",
                 "XCTestBootstrap",
+                "FBDeviceControl",
                 "CompanionUtilities"
             ],
             path: "Sources/SimUse",
@@ -188,7 +208,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SimUseTests",
-            dependencies: ["SimUse", "iOSSimBackend", "SimUseCore", "SimUseVideo"],
+            dependencies: ["SimUse", "iOSSimBackend", "iOSDeviceBackend", "SimUseCore", "SimUseVideo"],
             path: "Tests",
             // `Tests/` is the umbrella path; the sub-target test
             // directories below sit under it as separate testTargets.
@@ -245,6 +265,10 @@ let package = Package(
         .binaryTarget(
             name: "CompanionUtilities",
             path: "build_products/XCFrameworks/CompanionUtilities.xcframework"
+        ),
+        .binaryTarget(
+            name: "FBDeviceControl",
+            path: "build_products/XCFrameworks/FBDeviceControl.xcframework"
         ),
     ]
 )

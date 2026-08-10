@@ -491,7 +491,7 @@ function build_sim_use_executable() {
 function verify_xcframework_inputs() {
   local output_base_dir="$1"
   local xcframeworks_dir="${output_base_dir}/XCFrameworks"
-  local expected_frameworks=("FBControlCore" "XCTestBootstrap" "FBSimulatorControl" "CompanionUtilities")
+  local expected_frameworks=("FBControlCore" "XCTestBootstrap" "FBSimulatorControl" "FBDeviceControl" "CompanionUtilities")
 
   print_subsection "🧪" "Validating XCFramework inputs"
 
@@ -523,7 +523,7 @@ function verify_release_architectures() {
   local output_base_dir="$1"
   local frameworks_dir="${output_base_dir}/Frameworks"
   local executable_path="${output_base_dir}/sim-use"
-  local expected_frameworks=("FBControlCore" "XCTestBootstrap" "FBSimulatorControl" "CompanionUtilities")
+  local expected_frameworks=("FBControlCore" "XCTestBootstrap" "FBSimulatorControl" "FBDeviceControl" "CompanionUtilities")
 
   print_subsection "🧪" "Validating release artifact architectures"
   verify_macho_has_arch "${executable_path}" "arm64"
@@ -613,7 +613,8 @@ Commands:
     Clean previous build products and derived data.
 
   frameworks
-    Build all IDB frameworks (CompanionUtilities, FBControlCore, XCTestBootstrap, FBSimulatorControl).
+    Build all IDB frameworks (CompanionUtilities, FBControlCore, XCTestBootstrap,
+    FBSimulatorControl, FBDeviceControl).
 
   install
     Install built frameworks and the idb PrivateHeaders modules to build_products/.
@@ -677,6 +678,7 @@ function cmd_frameworks() {
   framework_build "FBControlCore" "${FBSIMCONTROL_PROJECT}" "${BUILD_OUTPUT_DIR}"
   framework_build "XCTestBootstrap" "${FBSIMCONTROL_PROJECT}" "${BUILD_OUTPUT_DIR}"
   framework_build "FBSimulatorControl" "${FBSIMCONTROL_PROJECT}" "${BUILD_OUTPUT_DIR}"
+  framework_build "FBDeviceControl" "${FBSIMCONTROL_PROJECT}" "${BUILD_OUTPUT_DIR}"
 }
 
 function cmd_install() {
@@ -685,6 +687,7 @@ function cmd_install() {
   install_framework "FBControlCore" "${BUILD_OUTPUT_DIR}"
   install_framework "XCTestBootstrap" "${BUILD_OUTPUT_DIR}"
   install_framework "FBSimulatorControl" "${BUILD_OUTPUT_DIR}"
+  install_framework "FBDeviceControl" "${BUILD_OUTPUT_DIR}"
   install_private_headers "${BUILD_OUTPUT_DIR}"
 }
 
@@ -694,6 +697,7 @@ function cmd_xcframeworks() {
   create_xcframework "FBControlCore" "${BUILD_OUTPUT_DIR}"
   create_xcframework "XCTestBootstrap" "${BUILD_OUTPUT_DIR}"
   create_xcframework "FBSimulatorControl" "${BUILD_OUTPUT_DIR}"
+  create_xcframework "FBDeviceControl" "${BUILD_OUTPUT_DIR}"
 }
 
 function cmd_executable() {

@@ -41,6 +41,7 @@ Plan, code, **verify**, ship — teach this CLI to your agent and close the last
 - [Install](#install)
 - [Platforms](#platforms)
 - [Commands](#commands)
+- [Physical iOS devices](#physical-ios-devices)
 - [Architecture](#architecture)
 - [Viewer](#viewer)
 - [Contributing](#contributing)
@@ -145,6 +146,8 @@ sim-use drives both **iOS Simulators** and **Android devices / emulators** throu
 
 For Android, run `sim-use android init --device <serial>` once to install the bridge APK. See `AGENTS.md` for Android toolchain setup.
 
+**Physical iPhones and iPads** are reachable too, under a separate `sim-use ios-device` surface — nothing is installed on the device, nothing is code signed and no Developer Disk Image is needed, but the device must be unlocked. That channel exposes no element geometry, so it trades coordinate taps, swipes and gestures for accessibility actions. See [Physical iOS devices](#physical-ios-devices).
+
 
 ## Commands
 
@@ -153,6 +156,7 @@ All device-scoped commands accept `--device <ID>` (optional when only one simula
   * **Top-level** — cross-platform verbs: `ui`, `tap`, `long-press`, `swipe`, `touch`, `multi-touch`, `type`, `paste`, `button`, `gesture`, `keyboard-state`, `screenshot`, `record-video`, `stream-video`, `app-state`. Same flags on iOS and Android.
   * **`sim-use ios <verb>`** — iOS-only: `key`, `key-combo`, `key-sequence`, `batch`.
   * **`sim-use android <verb>`** — Android-only: `init`, `devices`, `ping`, `scroll`.
+  * **`sim-use ios-device <verb>`** — physical iOS devices (experimental): `devices`, `ui`, `tap`. Separate from the top-level verbs because the capabilities differ — see [Physical iOS devices](#physical-ios-devices).
 
 Run `sim-use --help` or `sim-use <command> --help` for the full flag set.
 
@@ -381,9 +385,37 @@ SIM_USE_NO_DAEMON=1 sim-use ui --device $UDID
 Daemons self-exit after 600 s of idle and log to `/tmp/sim-use-<uid>/<UDID>.log`. Streaming commands (`screenshot`, `record-video`, `stream-video`) always run in-process regardless.
 
 
+## Physical iOS devices
+
+**Experimental.** A connected iPhone or iPad is driven through its accessibility audit daemon over usbmux lockdown — no XCUITest runner is installed, nothing is code signed, and no Developer Disk Image is mounted. The device must be **unlocked**; a locked screen accepts the connection and then reports no elements.
+
+```bash
+sim-use ios-device devices
+# 00008140-000210603A40801C  My iPhone  iOS 27.0  Booted
+
+sim-use ios-device ui
+# @4   Button  "Chats Button, Selected"
+# @5   Button  "Friends"
+# ...
+# 117 elements (316 nodes) in 6647 ms
+
+sim-use ios-device tap --text "Friends"
+# ✓ Activated Friends Button
+```
+
+A device is addressed by UDID or ECID, and `--device` is optional when only one is attached.
+
+This channel behaves differently from the simulator one, in ways that shape how you drive it:
+
+  * **No element geometry.** iOS serves no frames here — Xcode's own Accessibility Inspector shows no Frame row for a physical device either. So there is no coordinate tap, `swipe`, `gesture` or `multi-touch`; interaction is by accessibility action instead. Scrolling and app-defined swipe actions (a chat row's *Pin* or *Mute*, say) are reachable that way without any gesture.
+  * **No `@N` aliases across processes.** Element handles encode a live pointer and die with the connection, so `tap` resolves its target by `--text` inside a single session rather than reusing an alias from a previous `ui`.
+  * **Slower.** The daemon serialises requests, so a full tree costs a few seconds. `--fast` stops descending at labelled elements — roughly 40% quicker for about a quarter fewer elements.
+  * **Reading order, not screen order.** With no frames to sort by, the outline follows the accessibility tree's nesting and reading order.
+
+
 ## Architecture
 
-sim-use drives iOS Simulators through the lower-level XCFrameworks of Facebook's [idb](https://github.com/facebook/idb) (statically linked), Apple's Accessibility APIs, and the simulator HID pipeline. Android devices are driven through an on-device bridge APK that exposes the AccessibilityService tree and input injection over HTTP, tunnelled via `adb forward`. Everything ships as a single binary; every command supports `--json` for machine consumption.
+sim-use drives iOS Simulators through the lower-level XCFrameworks of Facebook's [idb](https://github.com/facebook/idb) (statically linked), Apple's Accessibility APIs, and the simulator HID pipeline. Android devices are driven through an on-device bridge APK that exposes the AccessibilityService tree and input injection over HTTP, tunnelled via `adb forward`. Physical iOS devices go through a third path: idb's `FBDeviceControl` opens a lockdown service connection, over which sim-use speaks Apple's DTX message protocol to the accessibility audit daemon. Everything ships as a single binary; every command supports `--json` for machine consumption.
 
 
 ## Viewer
