@@ -45,12 +45,39 @@ struct HarmonyTargetResolverTests {
             entry(alias: 2, role: "Button", label: "Save", y: 200),
         ]
 
-        #expect(throws: HarmonyOSError.self) {
+        do {
             _ = try HarmonyTargetResolver.resolve(
                 selector: HarmonySelector(label: "Save"),
                 entries: entries,
                 screen: screen
             )
+            Issue.record("Expected multiple matches to fail")
+        } catch let error as HarmonyTargetResolutionError {
+            #expect(error.errorDescription == "HarmonyOS selector matched 2 elements.")
+            #expect(error.hint?.contains("@1 Button \"Save\"") == true)
+            #expect(error.hint?.contains("--frame") == true)
+        } catch {
+            Issue.record("Expected HarmonyTargetResolutionError, got \(error)")
+        }
+    }
+
+    @Test("missing selectors include actionable candidate hints")
+    func noMatchHint() {
+        let entries = [entry(alias: 1, role: "Button", label: "Save", y: 100)]
+
+        do {
+            _ = try HarmonyTargetResolver.resolve(
+                selector: HarmonySelector(label: "Send"),
+                entries: entries,
+                screen: screen
+            )
+            Issue.record("Expected no match to fail")
+        } catch let error as HarmonyTargetResolutionError {
+            #expect(error.errorDescription == "No HarmonyOS element matched the supplied selector.")
+            #expect(error.hint?.contains("Re-run `sim-use ui`") == true)
+            #expect(error.hint?.contains("@1 Button \"Save\"") == true)
+        } catch {
+            Issue.record("Expected HarmonyTargetResolutionError, got \(error)")
         }
     }
 

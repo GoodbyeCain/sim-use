@@ -22,6 +22,8 @@ public struct AndroidDescribeUICommand: SimUseExecutableCommand {
     )
     public var noRaw: Bool = false
 
+    @OptionGroup public var output: DescribeUIOutputOptions
+
     @Flag(name: .customLong("include-offscreen"), help: "Include elements whose bounds fall outside the screen (default: filter them out).")
     public var includeOffscreen: Bool = false
 
@@ -35,14 +37,19 @@ public struct AndroidDescribeUICommand: SimUseExecutableCommand {
         try device.resolve()
     }
 
+    public func validate() throws {
+        try output.validate(jsonOutput: jsonOutput)
+    }
+
     public func execute() async throws -> ExecutionResult {
-        try Self.performDescribeUI(
+        let result = try Self.performDescribeUI(
             udid: device.resolved,
             includeOffscreen: includeOffscreen,
             // `raw` adds ~50–200 KB to the encoded envelope; only pay
             // the cost when the caller will actually see it.
-            includeRaw: jsonOutput && !noRaw
+            includeRaw: jsonOutput && !noRaw && !output.compact
         )
+        return output.compact ? result.compacted() : result
     }
 
     public func format(_ result: ExecutionResult) -> CommandOutput {

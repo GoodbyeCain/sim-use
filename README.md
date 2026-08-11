@@ -160,6 +160,7 @@ The HarmonyOS namespace avoids repeating the platform and auto-selects the targe
 sim-use harmonyos devices
 sim-use harmonyos ui
 sim-use harmonyos tap @5
+sim-use harmonyos tap --label Open --wait-timeout 3
 ```
 
 HarmonyOS support uses the SDK-provided `hdc`, `uitest`, and `uinput` tools directly; no device-side bridge app is installed. `hdc` provides the same transport for USB physical devices, TCP devices, and DevEco emulators. Install DevEco Studio or the command-line HarmonyOS/OpenHarmony SDK, put `hdc` on `PATH`, or set `SIM_USE_HDC` to its absolute path. Text injection through `uitest uiInput text` requires API 18 or newer.
@@ -383,6 +384,7 @@ boundary is visible.
 sim-use ui --device $UDID                      # compact outline (default)
 sim-use ui --json --device $UDID               # structured envelope
 sim-use ui --json --no-raw --device $UDID      # envelope without the raw tree (much smaller)
+sim-use ui --json --compact --device $UDID     # outline + screen/identity (agent loops)
 sim-use ui --point 100,200 --device $UDID      # specific point (same UI space as outline frames)
 ```
 
@@ -390,9 +392,13 @@ The `--json` envelope carries the raw accessibility tree under `data.raw` by def
 
 The outline uses region banding (`[Top]` / `[Content]` / `[Bottom]` / declared `Group` regions) and `@N` / `#N` / `#N@M` / `#<id>` alias addressing. When the device is rotated, the `App:` header carries an orientation tag (e.g. `(landscape-right)`) and the `--json` envelope an `orientation` field.
 
+`--compact` keeps `platform`, `outline`, `screen`, `appLabel`, and `appPackage`, removes the overlapping raw tree, and emits empty `entries` / `lists` arrays. The backend still writes the full alias cache, so the next `tap @N` works normally. Use full `--json` when a consumer needs exact entry frames or the platform-native tree.
+
 On iOS / Android, a list cluster detector attaches `#N` aliases to detected list cells. Outline lines for cells render as `@N #M` (dominant list) or `@N #M@S` (scope `S>1`); the `--json` envelope adds a sibling `lists` array, ordered by detector score, where each entry summarises one cluster as `{ scope, cellCount, cellHeight, containerRole, containerLabel, bbox, score }`. Per-cell membership is also surfaced through `entries[*].aliases.list = { scope, index }` so consumers can pivot on either shape. `lists[0]` is always the dominant cluster, or the array is empty when nothing list-shaped is on screen. HarmonyOS currently exposes `@N` and `#<id>` aliases but does not infer list-cell aliases.
 
-On HarmonyOS, a visible label may be a non-clickable leaf inside an actionable component (launcher app names are a common example). The outline and JSON preserve that leaf's real frame, while its cached `@N` activation point is promoted to the center of the nearest enabled `clickable` ancestor. Explicit coordinates are never promoted. Run `ui` after upgrading or after navigation so the cache reflects the current tree and activation points.
+On HarmonyOS, the `App:` header uses `bundleName/abilityName` so generic ability names such as `MainAbility` cannot make unrelated foreground apps look identical. A visible label may be a non-clickable leaf inside an actionable component (launcher app names are a common example). The outline and JSON preserve that leaf's real frame, while its cached `@N` activation point is promoted to the center of the nearest enabled `clickable` ancestor. Explicit coordinates are never promoted. Run `ui` after upgrading or after navigation so the cache reflects the current tree and activation points.
+
+HarmonyOS taps use a 0.05-second uinput down/up sequence by default because UITest's zero-duration click can report success while a standard control ignores the event on some devices. Both the top-level and `sim-use harmonyos tap` surfaces accept selector polling and timing flags. A successful command confirms dispatch only; verify the application post-condition with `ui` or a screenshot.
 
 ### App state & crash detection
 

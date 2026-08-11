@@ -45,7 +45,7 @@ Detailed solutions for common sim-use issues. The symptom index in SKILL.md poin
 
 ## System layer detection
 
-**Symptom:** `ui` output shows unexpected content — the `App:` header names a system process like `SpringBoard` (iOS) or `com.android.systemui` (Android).
+**Symptom:** `ui` output shows unexpected content — the `App:` header names a system process like `SpringBoard` (iOS), `com.android.systemui` (Android), or a different `bundleName/abilityName` component (HarmonyOS).
 
 **Why:** A system alert, permission dialog, or share sheet is covering the app. The accessibility tree reflects whatever is on top.
 
@@ -113,9 +113,10 @@ Detailed solutions for common sim-use issues. The symptom index in SKILL.md poin
 
 **Symptom:** `tap` reports success but the UI doesn't change.
 
-**Why:** The element wasn't interactive yet (animation in progress, view still loading), or it's a toggle that needs a brief hold.
+**Why:** `ok:true` confirms dispatch, not an application post-condition. The element may not be interactive yet (animation in progress, view still loading), or it may need a longer hold.
 
 **Recipes:**
-1. For animation: add `--pre-delay 0.3` to wait before tapping, or `sleep 0.4` between commands.
-2. For toggles/switches (shown as `CheckBox` in the outline): add `--duration 0.05`.
-3. For elements that appear after navigation: use `--wait-timeout 3` to poll until the element exists.
+1. Re-run `ui` or capture a screenshot before deciding whether the action succeeded.
+2. For animation: add `--pre-delay 0.3` to wait before tapping, or `sleep 0.4` between commands.
+3. For toggles/switches (shown as `CheckBox` in the outline), increase the hold with `--duration 0.1`. HarmonyOS already uses a 0.05s uinput down/up sequence for ordinary taps.
+4. For elements that appear after navigation: use `--wait-timeout 3` to poll until the element exists.

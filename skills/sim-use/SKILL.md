@@ -11,11 +11,15 @@ Before first interaction with a device, run the preflight check:
 python3 scripts/preflight.py --device <ID> [--platform ios|android|harmonyos]
 ```
 
-This verifies sim-use is installed, the device is reachable, and the daemon is healthy. If you don't have the script, do the checks manually:
+This non-interactive check verifies the sim-use version, a ready device state, a valid compact UI snapshot, and a PNG screenshot. It also pings hdc for HarmonyOS; daemon recovery applies only to iOS/Android. If you don't have the script, do the checks manually:
 
 1. `sim-use --version` — confirm sim-use is on PATH.
 2. `sim-use devices` — confirm the target device is listed and booted/connected.
-3. `sim-use ui --device <ID>` — confirm you can read the screen. Add `--platform harmonyos` for an hdc target.
+3. `sim-use harmonyos ping --device <ID>` — for HarmonyOS, confirm hdc shell transport.
+4. `sim-use ui --json --compact --device <ID>` — confirm you can read the screen. Add `--platform harmonyos` for an hdc target.
+5. `sim-use screenshot --device <ID> --output /tmp/sim-use-preflight.png` — confirm capture works.
+
+Preflight proves transport and observation readiness, not that a later input changed the UI. Keep the observe → act → verify loop below.
 
 `--device` is optional under the selected namespace's auto-resolution rule. For Android, run `sim-use android init --device <serial>` once to install the bridge APK. HarmonyOS uses hdc directly and installs nothing; use `sim-use harmonyos <verb>` when one hdc target is online, or add `--platform harmonyos --device <connect-key>` to a top-level verb.
 Attached physical iPhones/iPads appear in `sim-use devices` with kind `physical` and route through the top-level `ui`, selector-based `tap`, and `screenshot`; other verbs reject on that target. See *Physical iOS devices* below before driving one.
@@ -28,11 +32,15 @@ Every interaction follows the same cycle: **observe → act → verify**.
 
 ```bash
 sim-use ui --device <UDID>
+sim-use ui --json --compact --device <UDID>  # agent-friendly JSON
 ```
 
 Read the outline. Each element has an `@N` alias and optionally a `#<id>` identifier. On iOS / Android, detected list cells also carry `#N` (dominant list) or `#N@M` (scoped); HarmonyOS currently uses `@N` / `#<id>` only.
 
-Frames in the JSON output (`--json`: `entries[].frame`, `screen`) are in platform-native units — iOS **points**, Android / HarmonyOS **pixels**. Key off the envelope's `platform` field before doing math across platforms. Always pair `--json` with `--no-raw` — see *Keeping output small* below.
+Frames in the full JSON output (`--json`: `entries[].frame`, `screen`) are in platform-native units — iOS **points**, Android / HarmonyOS **pixels**. Key off `data.platform` before doing math across platforms. `--compact` keeps `outline`, `screen`, and app identity, removes `raw`, and emits empty `entries` / `lists` arrays; the full alias cache is still written for later `tap @N` calls.
+Use `--no-raw` when you need structured entries/lists without the raw tree; use `--compact` when the outline and screen/app metadata are sufficient.
+
+On HarmonyOS, `App:` uses `bundleName/abilityName` because generic names such as `MainAbility` alone cannot distinguish foreground apps.
 
 ### Act
 
@@ -51,7 +59,7 @@ Disambiguate collisions with `--element-type` or `--frame minY=0.7r` (see `refer
 
 ### Verify
 
-Always verify after acting — commands are fire-and-forget:
+Always verify after acting. `ok:true` means the command was dispatched successfully; it does not assert that the app changed state:
 
 ```bash
 sim-use ui --device <UDID>       # read the new screen state
@@ -80,7 +88,7 @@ Every byte of command output you read costs context. Defaults that keep the loop
 | Android back | `sim-use button back --device <UDID>` |
 | HarmonyOS target | Add `--platform harmonyos --device <connect-key>`, or use `sim-use harmonyos <verb>` |
 | Wait for animation | `sleep 0.4` between commands, or `--pre-delay 0.5` |
-| Toggle/switch | `sim-use tap @N --duration 0.05 --device <UDID>` (UISwitch needs a brief hold) |
+| Toggle/switch | `sim-use tap @N --duration 0.1 --device <UDID>` when the backend default is too brief |
 | Swipe | `sim-use swipe --from 50,500 --to 350,500 --device <UDID>` |
 | Pinch zoom in | `sim-use gesture pinch-out --device <UDID>` (two-finger spread) |
 | Rotate | `sim-use gesture rotate-cw --angle 90 --device <UDID>` |
@@ -130,9 +138,9 @@ Quick symptom index — see `references/pitfalls.md` for detailed recipes.
 |---|---|---|
 | `tap --label` hits wrong element | Label collision (e.g. header and tab bar share text) | Add `--frame minY=0.7r` or `--element-type` to narrow |
 | `tap @N` fails after navigation | Alias cache is stale | Re-run `ui` before tapping |
-| `App:` line shows wrong app | System layer (alert, share sheet) is on top | Dismiss it first, then re-run `ui` |
+| `App:` identity shows another app/system component | An alert, share sheet, or navigation opened another foreground component | Inspect the outline, dismiss or navigate back, then re-run `ui` |
 | `multipleMatches` error | Several elements share the selector | Use `--frame`, `--element-type`, or a more specific selector |
-| Tap lands but nothing happens | Animation in progress, or element not yet interactive | Add `--pre-delay 0.3` or `--wait-timeout 3` |
+| Tap reports success but nothing happens | Dispatch succeeded, but the element was not ready or needs a longer hold | Verify with `ui`; add `--pre-delay 0.3`, `--wait-timeout 3`, or `--duration 0.1` as appropriate |
 | iOS: `paste` drops text | Soft keyboard only; HID Cmd+V is ignored | Use `paste --via-menu --target-id <id>` |
 | Android: `paste` denied | Background clipboard access blocked | Use `type` instead |
 | HarmonyOS command routes to Android | adb and hdc IDs can have the same shape | Add `--platform harmonyos`, or use the `sim-use harmonyos` namespace |

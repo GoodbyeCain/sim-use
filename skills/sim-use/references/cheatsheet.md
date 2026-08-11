@@ -32,6 +32,8 @@ sim-use tap --point 100,200             # same, pair form
 
 HarmonyOS keeps the semantic leaf frame in `ui` output but caches the center of the nearest enabled clickable ancestor for a non-clickable leaf alias. This makes an app-name `StaticText` alias activate its launcher icon. Re-run `ui` after upgrading to refresh old alias caches; explicit coordinates remain literal.
 
+HarmonyOS renders the foreground identity as `bundleName/abilityName` in the `App:` header. Use `data.appPackage` when JSON consumers need the package alone.
+
 ## Disambiguating with --frame
 
 Narrow matches by screen region when selectors collide:
@@ -71,9 +73,12 @@ sim-use long-press --label "Photos" # selector targeting
 sim-use long-press @5 --duration 1.2  # custom hold time
 sim-use tap @5 --duration 0.05      # brief hold for toggles/switches
 sim-use tap @5 --pre-delay 0.3      # wait before tapping
+sim-use tap --label Open --wait-timeout 3 --poll-interval 0.25
 ```
 
 `long-press` is sugar over `tap --duration 0.8`. Same targeting surface as `tap`. Use for action menus, launcher popups, drag-handle activation.
+
+HarmonyOS uses a 0.05s uinput down/up sequence for an omitted or zero tap duration. Top-level and `sim-use harmonyos tap` both accept `--pre-delay`, `--post-delay`, `--wait-timeout`, and `--poll-interval`.
 
 Note: some Android apps render long-press menus in a `PopupWindow` overlay that the bridge's `describe-ui` cannot walk — verify with a screenshot when this matters.
 
@@ -225,4 +230,4 @@ Every command supports `--json`. Shape: `{ "ok": true/false, "data": {...}, "err
 
 The `hint` field on errors contains actionable guidance (e.g. candidate labels on `multipleMatches`). Use it for self-correcting retries.
 
-For `ui --json`, prefer `data.outline` / `data.entries` / `data.lists`. The `data.raw` field is the full platform tree (iOS AX, Android bridge tree, or HarmonyOS UITest dumpLayout) and is much larger; omit with `jq 'del(.data.raw)'` in agent loops.
+For agent loops, prefer `ui --json --compact`. It keeps `data.platform`, `outline`, `screen`, `appLabel`, and `appPackage`, writes the normal alias cache, removes `raw`, and emits empty `entries` / `lists` arrays. Use plain `ui --json` only when structured entries or the full platform tree are required.

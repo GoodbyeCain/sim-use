@@ -78,7 +78,7 @@ struct Tap: SimUseExecutableCommand {
     @Option(
         name: .customLong("duration"),
         help: ArgumentHelp(
-            "How long to hold the touch between down and up in seconds. Omitted by default — the tap is dispatched as a single combined HID event for minimum latency. Provide a small positive value (e.g. 0.05) when targeting controls whose gesture recognisers ignore zero-duration HID taps, most notably UISwitch (`CheckBox` in the outline)."
+            "How long to hold the touch between down and up in seconds. Omitted by default — each backend uses its shortest reliable tap (HarmonyOS uses a 0.05s uinput down/up sequence). Provide a larger value when a control requires a deliberate hold."
         )
     )
     var duration: Double?

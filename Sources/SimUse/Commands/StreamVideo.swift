@@ -108,6 +108,8 @@ struct StreamVideo: SimUseExecutableCommand {
                 reason: "video capture is not wired up for physical devices (CoreDevice screen recording is capability-gated per device).",
                 alternative: "Capture stills instead: `sim-use screenshot` works on any screen, system apps included."
             )
+        case .harmonyOS:
+            throw CLIError(errorDescription: "HarmonyOS stream-video is not available yet; use screenshot for still captures.")
         case .iOSSim, .none:
             return try await executeIOSSim()
         }

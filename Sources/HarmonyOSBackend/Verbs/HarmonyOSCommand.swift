@@ -118,16 +118,19 @@ public struct HarmonyOSDescribeUICommand: SimUseExecutableCommand {
     @OptionGroup public var device: HarmonyDeviceOptions
     @Flag(name: .customLong("include-offscreen")) public var includeOffscreen = false
     @Flag(name: .customLong("json")) public var jsonOutput = false
+    @OptionGroup public var output: DescribeUIOutputOptions
     public init() {}
     public typealias ExecutionResult = DescribeUIResult
     public var daemonBypass: Bool { true }
     public mutating func resolveDeferredArguments() throws { try device.resolve() }
+    public func validate() throws { try output.validate(jsonOutput: jsonOutput) }
     public func execute() async throws -> ExecutionResult {
-        try Self.performDescribeUI(
+        let result = try Self.performDescribeUI(
             connectKey: device.resolved,
             includeOffscreen: includeOffscreen,
-            includeRaw: jsonOutput
+            includeRaw: jsonOutput && !output.compact
         )
+        return output.compact ? result.compacted() : result
     }
     public func format(_ result: ExecutionResult) -> CommandOutput { .raw(result.outline) }
     public static func performDescribeUI(
@@ -148,17 +151,12 @@ public struct HarmonyOSTapCommand: SimUseExecutableCommand {
     public static let configuration = CommandConfiguration(commandName: "tap", abstract: "Tap a HarmonyOS element by alias, selector, or coordinate.")
     @OptionGroup public var device: HarmonyDeviceOptions
     @Argument public var alias: String?
-    @Option(name: [.customShort("x"), .customLong("x")]) public var x: Int?
-    @Option(name: [.customShort("y"), .customLong("y")]) public var y: Int?
-    @Option(name: .customLong("point")) public var point: CoordinatePair?
-    @Option(name: .customLong("id")) public var id: String?
-    @Option(name: .customLong("label")) public var label: String?
-    @Option(name: .customLong("label-contains")) public var labelContains: String?
-    @Option(name: .customLong("label-regex")) public var labelRegex: String?
-    @Option(name: .customLong("value")) public var value: String?
-    @Option(name: .customLong("element-type")) public var elementType: String?
-    @Option(name: .customLong("frame"), parsing: .unconditionalSingleValue) public var frameSpecs: [String] = []
-    @Option(name: .customLong("duration")) public var duration: Double?
+    @OptionGroup public var targeting: TapTargetingOptions
+    @Option(
+        name: .customLong("duration"),
+        help: "How long to hold the touch in seconds. Omitted or zero uses the reliable 0.05s HarmonyOS tap interval."
+    ) public var duration: Double?
+    @OptionGroup public var timing: TapTimingOptions
     @Flag(name: .customLong("json")) public var jsonOutput = false
 
     public init() {}
@@ -167,38 +165,28 @@ public struct HarmonyOSTapCommand: SimUseExecutableCommand {
     public mutating func resolveDeferredArguments() throws { try device.resolve() }
 
     public func validate() throws {
-        _ = try TapCoordinateResolver.resolve(x: x.map(Double.init), y: y.map(Double.init), point: point)
-        if let duration, !(0...10).contains(duration) {
-            throw ValidationError("--duration must be between 0 and 10 seconds.")
-        }
-        if !frameSpecs.isEmpty { _ = try SelectorFrameFilter(specs: frameSpecs) }
-        if let labelRegex {
-            do {
-                _ = try NSRegularExpression(pattern: labelRegex)
-            } catch {
-                throw ValidationError("--label-regex is not a valid ICU regular expression: \(error.localizedDescription)")
-            }
-        }
-        let primarySelectors = [id, label, labelContains, labelRegex, value].compactMap { $0 }
-        guard primarySelectors.count <= 1 else {
-            throw ValidationError("Use only one of --id, --label, --label-contains, --label-regex, or --value.")
-        }
-        let explicit = try TapCoordinateResolver.resolve(x: x.map(Double.init), y: y.map(Double.init), point: point)
-        let targetingModes = (alias == nil ? 0 : 1) + (explicit == nil ? 0 : 1) + (primarySelectors.isEmpty ? 0 : 1)
-        guard targetingModes == 1 else {
-            throw ValidationError("Provide exactly one alias, coordinate, or primary selector.")
-        }
+        try targeting.validate(alias: alias)
+        try timing.validate()
+        try TapTimingOptions.validateDuration(duration)
     }
 
     public func execute() async throws -> ExecutionResult {
-        let explicit = try TapCoordinateResolver.resolve(x: x.map(Double.init), y: y.map(Double.init), point: point)
+        let explicit = try TapCoordinateResolver.resolve(
+            x: targeting.pointX,
+            y: targeting.pointY,
+            point: targeting.point
+        )
         let result = try await Self.performTap(
             connectKey: device.resolved,
             alias: alias,
             x: explicit.map { Int($0.x.rounded()) },
             y: explicit.map { Int($0.y.rounded()) },
             selector: selector(),
-            duration: duration
+            duration: duration,
+            preDelay: timing.preDelay,
+            postDelay: timing.postDelay,
+            waitTimeout: timing.waitTimeout,
+            pollInterval: timing.pollInterval
         )
         return ExecutionResult(x: Double(result.x), y: Double(result.y))
     }
@@ -236,14 +224,14 @@ public struct HarmonyOSTapCommand: SimUseExecutableCommand {
                     controller: controller
                 )
                 break
-            } catch let error as HarmonyOSError {
+            } catch let error as HarmonyTargetResolutionError {
                 guard waitTimeout > 0,
                       alias == nil,
                       x == nil,
                       y == nil,
                       !selector.isEmpty,
                       Date() < deadline,
-                      case .unsupported = error else {
+                      error.isRetryable else {
                     throw error
                 }
                 try await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
@@ -258,13 +246,15 @@ public struct HarmonyOSTapCommand: SimUseExecutableCommand {
 
     private func selector() -> HarmonySelector {
         HarmonySelector(
-            id: id,
-            label: label,
-            labelContains: labelContains,
-            labelRegex: labelRegex,
-            value: value,
-            elementType: elementType,
-            frame: frameSpecs.isEmpty ? nil : try? SelectorFrameFilter(specs: frameSpecs)
+            id: targeting.elementID,
+            label: targeting.elementLabel,
+            labelContains: targeting.labelContains,
+            labelRegex: targeting.labelRegex,
+            value: targeting.elementValue,
+            elementType: targeting.elementType,
+            frame: targeting.frameSpecs.isEmpty
+                ? nil
+                : try? SelectorFrameFilter(specs: targeting.frameSpecs)
         )
     }
 }

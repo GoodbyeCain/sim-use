@@ -24,6 +24,42 @@ struct HarmonyCommandParsingTests {
         }
     }
 
+    @Test("tap exposes the shared selector and timing surface")
+    func tapSharedOptions() throws {
+        let command = try HarmonyOSTapCommand.parse([
+            "--label", "Open",
+            "--element-type", "Button",
+            "--frame", "minY=0.5r",
+            "--pre-delay", "0.1",
+            "--post-delay", "0.2",
+            "--wait-timeout", "2",
+            "--poll-interval", "0.4",
+            "--device", "hdc-target",
+        ])
+
+        #expect(command.targeting.elementLabel == "Open")
+        #expect(command.targeting.elementType == "Button")
+        #expect(command.targeting.frameSpecs == ["minY=0.5r"])
+        #expect(command.timing.preDelay == 0.1)
+        #expect(command.timing.postDelay == 0.2)
+        #expect(command.timing.waitTimeout == 2)
+        #expect(command.timing.pollInterval == 0.4)
+    }
+
+    @Test("compact UI output requires JSON")
+    func compactUIRequiresJSON() throws {
+        let command = try HarmonyOSDescribeUICommand.parse([
+            "--compact", "--json", "--device", "hdc-target",
+        ])
+        #expect(command.output.compact)
+
+        #expect(throws: (any Error).self) {
+            _ = try HarmonyOSDescribeUICommand.parse([
+                "--compact", "--device", "hdc-target",
+            ])
+        }
+    }
+
     @Test("multi-touch rejects non-finite coordinates")
     func multiTouchCoordinates() {
         do {

@@ -63,4 +63,23 @@ public struct DescribeUIResult: Codable, Equatable, Sendable {
         self.appPackage = appPackage
         self.crashDialog = crashDialog
     }
+
+    /// Preserve the human-readable outline and foreground identity while
+    /// removing the raw tree and clearing the two overlapping structured
+    /// representations that dominate agent context. The backend has already
+    /// written its full alias cache before this view is created, so `tap @N`
+    /// remains available.
+    public func compacted() -> DescribeUIResult {
+        DescribeUIResult(
+            platform: platform,
+            raw: nil,
+            outline: outline,
+            entries: [],
+            lists: [],
+            screen: screen,
+            appLabel: appLabel,
+            appPackage: appPackage,
+            crashDialog: crashDialog
+        )
+    }
 }

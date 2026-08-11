@@ -106,6 +106,7 @@ struct DescribeUIForwarderTests {
             "--min-cell-size", "20",
             "--seed-cell-width", "200",
             "--seed-cell-height", "100",
+            "--compact",
             "--udid", "9CD7C6E7-45B3-4E59-BBF2-4D12A9457CD0",
             "--json"
         ]
@@ -122,6 +123,8 @@ struct DescribeUIForwarderTests {
         #expect(subCmd.seedCellWidth == 200)
         #expect(topLevel.seedCellHeight == 100)
         #expect(subCmd.seedCellHeight == 100)
+        #expect(topLevel.output.compact)
+        #expect(subCmd.output.compact)
         #expect(topLevel.jsonOutput)
         #expect(subCmd.jsonOutput)
     }

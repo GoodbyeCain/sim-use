@@ -35,6 +35,37 @@ public struct HarmonySelector: Sendable {
     }
 }
 
+public enum HarmonyTargetResolutionError: LocalizedError, HintProviding, Equatable {
+    case noMatches(candidates: [String])
+    case multipleMatches(count: Int, candidates: [String])
+
+    public var isRetryable: Bool { true }
+
+    public var errorDescription: String? {
+        switch self {
+        case .noMatches:
+            return "No HarmonyOS element matched the supplied selector."
+        case .multipleMatches(let count, _):
+            return "HarmonyOS selector matched \(count) elements."
+        }
+    }
+
+    public var hint: String? {
+        switch self {
+        case .noMatches(let candidates):
+            let sample = candidates.isEmpty
+                ? "The current outline has no labelled candidates."
+                : "Available candidates include: \(candidates.joined(separator: "; "))."
+            return "Re-run `sim-use ui` to confirm the current screen and selector. \(sample)"
+        case .multipleMatches(_, let candidates):
+            let sample = candidates.isEmpty
+                ? ""
+                : " Candidates: \(candidates.joined(separator: "; "))."
+            return "Add --element-type or --frame to disambiguate.\(sample)"
+        }
+    }
+}
+
 public enum HarmonyTargetResolver {
     public struct Target: Sendable {
         public let x: Int
@@ -119,13 +150,14 @@ public enum HarmonyTargetResolver {
             matches = matches.filter { resolved.contains($0.frame) }
         }
         guard !matches.isEmpty else {
-            throw HarmonyOSError.unsupported("No HarmonyOS element matched the supplied selector.")
+            throw HarmonyTargetResolutionError.noMatches(
+                candidates: candidateDescriptions(entries)
+            )
         }
         guard matches.count == 1 else {
-            let candidates = matches.prefix(8).map { "@\($0.aliases.at) \($0.role) \"\($0.label)\"" }
-                .joined(separator: "; ")
-            throw HarmonyOSError.unsupported(
-                "HarmonyOS selector matched \(matches.count) elements: \(candidates). Add --element-type or --frame to disambiguate."
+            throw HarmonyTargetResolutionError.multipleMatches(
+                count: matches.count,
+                candidates: candidateDescriptions(matches)
             )
         }
         let entry = matches[0]
@@ -134,5 +166,21 @@ public enum HarmonyTargetResolver {
             y: entry.frame.y + entry.frame.height / 2,
             description: "selector → \(entry.role) \"\(entry.label)\""
         )
+    }
+
+    private static func candidateDescriptions(
+        _ entries: [Outline.Entry],
+        limit: Int = 8
+    ) -> [String] {
+        var seen = Set<String>()
+        var candidates: [String] = []
+        for entry in entries where !entry.label.isEmpty {
+            let label = entry.label.replacingOccurrences(of: "\"", with: "\\\"")
+            let candidate = "@\(entry.aliases.at) \(entry.role) \"\(label)\""
+            guard seen.insert(candidate).inserted else { continue }
+            candidates.append(candidate)
+            if candidates.count == limit { break }
+        }
+        return candidates
     }
 }

@@ -3,12 +3,12 @@ import ArgumentParser
 import Foundation
 
 /// Shared timing flag surface of the tap family (`tap`, `long-press`,
-/// `ios tap`): delays around the action and the element-wait polling
+/// `ios tap`, `harmonyos tap`): delays around the action and the element-wait polling
 /// knobs. Declared once so every surface parses identically and the
 /// top-level forwarders transfer the whole parsed group (#42).
 ///
 /// `--duration` is deliberately NOT part of this group — `tap` (nil
-/// default, single combined HID event) and `long-press` (0.8s default)
+/// default, backend-native reliable tap) and `long-press` (0.8s default)
 /// disagree on both default and help text, so each command declares it
 /// and runs `TapTimingOptions.validateDuration` alongside `validate()`.
 public struct TapTimingOptions: ParsableArguments {
@@ -29,7 +29,7 @@ public struct TapTimingOptions: ParsableArguments {
     /// ArgumentParser (1.5.0) does not auto-validate nested option
     /// groups — each command must call this explicitly from its own
     /// `validate()`, the same convention `MultiTouchOptions.validate()`
-    /// uses. `TapValidationParityTests` pins that all three surfaces do.
+    /// uses. Parser tests pin that every surface does.
     public func validate() throws {
         if let preDelay {
             guard preDelay >= 0 && preDelay <= 10.0 else {

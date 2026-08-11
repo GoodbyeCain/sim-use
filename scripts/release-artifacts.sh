@@ -173,7 +173,11 @@ verify_stage() {
   # (`scripts/build.sh::build_sim_use_executable` rpath block).
   local -a raw_rpaths normalized_rpaths
   local rpath norm dup_rpaths
-  mapfile -t raw_rpaths < <(otool -arch arm64 -l "$stage_dir/sim-use" 2>/dev/null | awk '/LC_RPATH/{r=1} r==1 && /path/{print $2; r=0}')
+  while IFS= read -r rpath; do
+    raw_rpaths+=("$rpath")
+  done < <(otool -arch arm64 -l "$stage_dir/sim-use" 2>/dev/null | awk '/LC_RPATH/{r=1} r==1 && /path/{print $2; r=0}')
+  (( ${#raw_rpaths[@]} > 0 )) \
+    || fail "Executable has no LC_RPATH entries; staged frameworks will not be discoverable at runtime."
   for rpath in "${raw_rpaths[@]}"; do
     norm="$rpath"
     norm="${norm//@loader_path/__EXE__}"

@@ -80,6 +80,25 @@ struct HdcTests {
         ])
     }
 
+    @Test("tap uses a brief uinput down/up sequence by default")
+    func tapArguments() throws {
+        let fixture = try FakeHdc()
+        defer { fixture.remove() }
+        let controller = HarmonyDeviceController(hdc: Hdc(binaryPath: fixture.executable.path))
+
+        try controller.tap(connectKey: "device-1", x: 100, y: 200)
+        #expect(try fixture.arguments() == [
+            "-t", "device-1", "shell", "uinput", "-T", "-d", "100", "200",
+            "-i", "50", "-u", "100", "200",
+        ])
+
+        try controller.tap(connectKey: "device-1", x: 100, y: 200, duration: 0.1)
+        #expect(try fixture.arguments() == [
+            "-t", "device-1", "shell", "uinput", "-T", "-d", "100", "200",
+            "-i", "100", "-u", "100", "200",
+        ])
+    }
+
     @Test("hdc logical failures are errors even when the process exits zero")
     func logicalFailure() throws {
         let fixture = try FakeHdc(logicalFailure: true)

@@ -78,6 +78,8 @@ struct DescribeUI: SimUseExecutableCommand {
     )
     var noRaw: Bool = false
 
+    @OptionGroup var output: DescribeUIOutputOptions
+
     var jsonOutput: Bool { json.enabled }
 
     @Flag(
@@ -101,6 +103,7 @@ struct DescribeUI: SimUseExecutableCommand {
             seedCellWidth: seedCellWidth,
             seedCellHeight: seedCellHeight
         )
+        try output.validate(jsonOutput: jsonOutput)
     }
 
     func execute() async throws -> ExecutionResult {
@@ -139,6 +142,7 @@ struct DescribeUI: SimUseExecutableCommand {
         sub.device = device
         sub.json = json
         sub.noRaw = noRaw
+        sub.output = output
         return sub
     }
 
@@ -193,14 +197,14 @@ struct DescribeUI: SimUseExecutableCommand {
         let result = try AndroidDescribeUICommand.performDescribeUI(
             udid: device.resolved,
             includeOffscreen: includeOffscreen,
-            includeRaw: jsonOutput && !noRaw
+            includeRaw: jsonOutput && !noRaw && !output.compact
         )
         return ExecutionResult(
             platform: result.platform.rawValue,
             raw: result.raw,
             outline: result.outline,
-            entries: result.entries,
-            lists: result.lists,
+            entries: output.compact ? [] : result.entries,
+            lists: output.compact ? [] : result.lists,
             screen: result.screen,
             appLabel: result.appLabel,
             appPackage: result.appPackage,
@@ -215,14 +219,14 @@ struct DescribeUI: SimUseExecutableCommand {
         let result = try HarmonyOSDescribeUICommand.performDescribeUI(
             connectKey: device.resolved,
             includeOffscreen: includeOffscreen,
-            includeRaw: jsonOutput
+            includeRaw: jsonOutput && !noRaw && !output.compact
         )
         return ExecutionResult(
             platform: result.platform.rawValue,
             raw: result.raw,
             outline: result.outline,
-            entries: result.entries,
-            lists: result.lists,
+            entries: output.compact ? [] : result.entries,
+            lists: output.compact ? [] : result.lists,
             screen: result.screen,
             appLabel: result.appLabel,
             appPackage: result.appPackage,

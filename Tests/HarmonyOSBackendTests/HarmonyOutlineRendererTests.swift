@@ -15,7 +15,8 @@ struct HarmonyOutlineRendererTests {
 
         let outline = HarmonyOutlineRenderer.render(root: root)
 
-        #expect(outline.appLabel == "EntryAbility")
+        #expect(outline.appLabel == "com.example.demo/EntryAbility")
+        #expect(outline.text.hasPrefix("App: com.example.demo/EntryAbility  1080x2504"))
         #expect(outline.screen == Outline.Frame(x: 0, y: 0, width: 1080, height: 2504))
         #expect(outline.entries.count == 2)
         #expect(outline.entries[0].role == "Button")

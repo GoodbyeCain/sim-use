@@ -70,6 +70,8 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
     )
     public var noRaw: Bool = false
 
+    @OptionGroup public var output: DescribeUIOutputOptions
+
     public var jsonOutput: Bool { json.enabled }
 
     /// Result shape is structured under `raw` rather than being the bare
@@ -147,6 +149,22 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             self.commandAdvisory = commandAdvisory
         }
 
+        public func compacted() -> ExecutionResult {
+            ExecutionResult(
+                platform: platform,
+                raw: nil,
+                outline: outline,
+                entries: [],
+                lists: [],
+                screen: screen,
+                appLabel: appLabel,
+                appPackage: appPackage,
+                crashDialog: crashDialog,
+                orientation: orientation,
+                commandAdvisory: commandAdvisory
+            )
+        }
+
         private enum CodingKeys: String, CodingKey {
             case platform
             case kind
@@ -178,6 +196,7 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             seedCellWidth: seedCellWidth,
             seedCellHeight: seedCellHeight
         )
+        try output.validate(jsonOutput: jsonOutput)
     }
 
     /// Shared scalar-option validation. The top-level cross-platform
@@ -231,7 +250,9 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
         // see it. On a complex screen the parse is ~30 ms and shuffling
         // it across the daemon socket adds another ~80 ms. `outline` +
         // `entries` cover every other consumer.
-        let tree: JSONValue? = (jsonOutput && !noRaw) ? try JSONValue.decode(from: jsonData) : nil
+        let tree: JSONValue? = (jsonOutput && !noRaw && !output.compact)
+            ? try JSONValue.decode(from: jsonData)
+            : nil
 
         // Decode the same bytes into the typed tree for outline rendering.
         // `--point` returns a single element object instead of a root
@@ -287,7 +308,7 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             }
         }
 
-        return ExecutionResult(
+        let result = ExecutionResult(
             platform: "ios",
             raw: tree,
             outline: outline.text,
@@ -305,6 +326,7 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
                 [fetchResult.advisory, fetchResult.calibration?.advisory].compactMap { $0 }
             )
         )
+        return output.compact ? result.compacted() : result
     }
 
     public func format(_ result: ExecutionResult) -> CommandOutput {

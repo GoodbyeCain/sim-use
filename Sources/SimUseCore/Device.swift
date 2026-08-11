@@ -95,6 +95,26 @@ public struct Device: Codable, Equatable, Hashable, Sendable {
         self.runtime = runtime
     }
 
+    /// Compatibility initializer for callers that predate the `kind` axis.
+    /// iOS rows historically represented simulators; non-iOS rows default to
+    /// physical hardware until a lister can provide a more precise carrier.
+    public init(
+        udid: String,
+        name: String,
+        platform: Platform,
+        state: String,
+        runtime: String?
+    ) {
+        self.init(
+            udid: udid,
+            name: name,
+            platform: platform,
+            kind: platform == .ios ? .simulator : .physical,
+            state: state,
+            runtime: runtime
+        )
+    }
+
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let deviceId = try c.decodeIfPresent(String.self, forKey: .deviceId)
