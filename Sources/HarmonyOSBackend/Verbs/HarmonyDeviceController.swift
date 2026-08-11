@@ -5,6 +5,11 @@ import SimUseCore
 /// High-level HarmonyOS operations built entirely on SDK-provided hdc,
 /// UITest, and uinput commands. No device-side bridge application is needed.
 public final class HarmonyDeviceController {
+    /// A brief down/up interval is more broadly accepted than UITest's
+    /// zero-duration `uiInput click`, which can return success while a
+    /// standard system Button ignores the event on some devices.
+    public static let defaultTapDuration: TimeInterval = 0.05
+
     public let hdc: Hdc
 
     public init(hdc: Hdc = Hdc()) {
@@ -101,18 +106,18 @@ public final class HarmonyDeviceController {
     }
 
     public func tap(connectKey: String, x: Int, y: Int, duration: Double? = nil) throws {
-        if let duration, duration > 0 {
-            let milliseconds = try validatedMilliseconds(duration, range: 1...15_000, flag: "duration")
-            _ = try hdc.shell(target: connectKey, args: [
-                "uinput", "-T", "-d", String(x), String(y),
-                "-i", String(milliseconds),
-                "-u", String(x), String(y),
-            ])
-        } else {
-            _ = try hdc.shell(target: connectKey, args: [
-                "uitest", "uiInput", "click", String(x), String(y),
-            ])
-        }
+        let effectiveDuration = duration.flatMap { $0 > 0 ? $0 : nil }
+            ?? Self.defaultTapDuration
+        let milliseconds = try validatedMilliseconds(
+            effectiveDuration,
+            range: 1...15_000,
+            flag: "duration"
+        )
+        _ = try hdc.shell(target: connectKey, args: [
+            "uinput", "-T", "-d", String(x), String(y),
+            "-i", String(milliseconds),
+            "-u", String(x), String(y),
+        ])
     }
 
     public func swipe(

@@ -3,7 +3,7 @@ import ArgumentParser
 import Foundation
 
 /// Shared targeting flag surface of the tap family (`tap`,
-/// `long-press`, `ios tap`): explicit coordinates, the five
+/// `long-press`, `ios tap`, `harmonyos tap`): explicit coordinates, the five
 /// accessibility selectors, and the type / frame disambiguators.
 /// Declared once so every surface parses identically and the top-level
 /// forwarders transfer the whole parsed group instead of copying

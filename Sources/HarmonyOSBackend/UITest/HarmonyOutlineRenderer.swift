@@ -75,7 +75,8 @@ public enum HarmonyOutlineRenderer {
     ) -> RenderedOutline {
         let screen = screenFrame(root)
         let appPackage = firstNonEmpty(root, keyPath: \HarmonyElementNode.bundleName) ?? "HarmonyOS App"
-        let appLabel = firstNonEmpty(root, keyPath: \HarmonyElementNode.abilityName) ?? appPackage
+        let abilityName = firstNonEmpty(root, keyPath: \HarmonyElementNode.abilityName)
+        let appLabel = appIdentity(package: appPackage, ability: abilityName)
 
         var candidates: [Candidate] = []
         walk(
@@ -141,6 +142,16 @@ public enum HarmonyOutlineRenderer {
 
     public static func appPackage(root: HarmonyElementNode) -> String {
         firstNonEmpty(root, keyPath: \HarmonyElementNode.bundleName) ?? ""
+    }
+
+    /// HarmonyOS commonly reports every foreground component as
+    /// `MainAbility`. Rendering that value alone makes unrelated apps
+    /// indistinguishable, which defeats wrong-app and system-overlay checks.
+    /// Keep the existing `appLabel` field but make it a stable component
+    /// identity until UITest exposes a user-facing application name.
+    private static func appIdentity(package: String, ability: String?) -> String {
+        guard let ability, !ability.isEmpty, ability != package else { return package }
+        return "\(package)/\(ability)"
     }
 
     private static func walk(

@@ -4,238 +4,216 @@ import Testing
 
 @Suite("Preflight Script Tests")
 struct PreflightScriptTests {
-    @Test("device listing does not receive device-scoped options")
+    @Test("device listing stays unscoped while observation checks target the resolved device")
     func deviceListingDoesNotReceiveDeviceScopedOptions() async throws {
-        let fixture = try makeFakeSimUse(versionStamp: "0.16.0")
-        defer { try? FileManager.default.removeItem(at: fixture.tempRoot) }
+        let fixture = try Fixture(
+            script: successScript(platform: "ios", device: "target-device", state: "Booted")
+        )
+        defer { fixture.remove() }
 
-        let result = try await runPreflight(fakeSimUse: fixture.executable)
+        let result = try await CommandRunner.run(
+            "python3 skills/sim-use/scripts/preflight.py --device target-device --sim-use-bin \(fixture.executable.path)",
+            allowFailure: true
+        )
 
         #expect(result.exitCode == 0, "preflight should pass with fake sim-use: \(result.output)")
-        #expect(result.output.contains("All checks passed"))
+        #expect(result.output.contains("sim-use 0.11.0"))
+        #expect(result.output.contains("Transport and observation are ready"))
 
-        let log = try String(contentsOf: fixture.logFile, encoding: .utf8)
+        let log = try fixture.logContents()
         #expect(log.contains("--version\n"))
         #expect(log.contains("devices --json\n"))
         #expect(!log.contains("devices --json --device target-device"))
-        #expect(log.contains("ui --json --device target-device"))
+        #expect(log.contains("ui --compact --json --device target-device --platform ios"))
+        #expect(log.contains("screenshot --output"))
     }
 
-    // The floor is 0.16.0: the skill tells agents to use `ios fold` and
-    // `ios rotate`, and relies on the secondary-display refusals and the
-    // `display` tag that release introduces (docs/ai/010-display-routing);
-    // a 0.15.0 CLI has no such verbs and would tap the dark main display of
-    // an unfolded iPhone Duo with a false success. Restored verified paste
-    // also ships in the unreleased 0.16.0; it needs no higher floor.
-    @Test("version compatibility follows release normalization", arguments: [
-        (stamp: "0.16.0", versionExitCode: 0, expectedPass: true),
-        (stamp: "0.17.0", versionExitCode: 0, expectedPass: true),
-        (stamp: "v0.16.0", versionExitCode: 0, expectedPass: true),
-        (stamp: "v0.16.0-3-gabc1234-dirty", versionExitCode: 0, expectedPass: true),
-        (stamp: "v0.15.0-3-gabc1234-dirty", versionExitCode: 0, expectedPass: true),
-        (stamp: "dev", versionExitCode: 0, expectedPass: true),
-        (stamp: "0.15.0", versionExitCode: 0, expectedPass: false),
-        (stamp: "v0.15.0", versionExitCode: 0, expectedPass: false),
-        (stamp: "0.15.9", versionExitCode: 0, expectedPass: false),
-        (stamp: "0.14.0", versionExitCode: 0, expectedPass: false),
-        (stamp: "v0.14.0-5-gabc1234", versionExitCode: 0, expectedPass: true),
-        (stamp: "0.16.0", versionExitCode: 7, expectedPass: false),
-    ])
-    func versionCompatibility(
-        _ testCase: (stamp: String, versionExitCode: Int, expectedPass: Bool)
-    ) async throws {
-        let fixture = try makeFakeSimUse(
-            versionStamp: testCase.stamp,
-            versionExitCode: testCase.versionExitCode
+    @Test("HarmonyOS preflight adds ping and never invokes daemon autofix")
+    func harmonyOSPlatformChecks() async throws {
+        let fixture = try Fixture(
+            script: successScript(platform: "harmonyos", device: "hdc-target", state: "Connected")
         )
-        defer { try? FileManager.default.removeItem(at: fixture.tempRoot) }
+        defer { fixture.remove() }
 
-        let result = try await runPreflight(fakeSimUse: fixture.executable)
-        let expectedExitCode = testCase.expectedPass ? 0 : 1
-        #expect(
-            result.exitCode == expectedExitCode,
-            "unexpected preflight result for version stamp \(testCase.stamp): \(result.output)"
-        )
-
-        let log = try String(contentsOf: fixture.logFile, encoding: .utf8)
-        if testCase.expectedPass {
-            #expect(result.output.contains("All checks passed"))
-            #expect(log.contains("devices --json\n"))
-            #expect(log.contains("ui --json --device target-device\n"))
-        } else {
-            #expect(result.output.contains("FAIL  sim-use version is compatible with this skill"))
-            #expect(result.output.contains("brew upgrade lycorp-jp/tap/sim-use"))
-            #expect(log == "--version\n")
-        }
-    }
-
-    @Test("remote content recovery warns without failing or restarting the daemon", arguments: [
-        #"{"ok":true,"advisory":{"kind":"remote_content_recovery"},"data":{"platform":"ios","screen":{"width":0,"height":0},"entries":[{"role":"StaticText","label":"12:00"}]}}"#,
-        #"{"ok":true,"advisory":{"kind":"remote_content_recovery"},"data":{"platform":"ios","entries":[{"role":"Button","label":"Browse"},{"role":"Button","label":"Cancel"}]}}"#,
-    ])
-    func remoteContentRecoveryWarns(uiResponse: String) async throws {
-        let fixture = try makeFakeSimUse(versionStamp: "0.16.0", uiResponse: uiResponse)
-        defer { try? FileManager.default.removeItem(at: fixture.tempRoot) }
-
-        let result = try await runPreflight(fakeSimUse: fixture.executable)
-
-        #expect(result.exitCode == 0)
-        #expect(result.output.contains("PASS  sim-use ui returns a valid response"))
-        #expect(result.output.contains("WARN"))
-        #expect(result.output.contains("remote_content_recovery"))
-        #expect(result.output.contains("system picker"))
-        #expect(result.output.contains("If visible app controls are missing"))
-        #expect(result.output.contains("ApplicationAccessibilityEnabled"))
-        #expect(result.output.contains("relaunch"))
-        #expect(result.output.contains("Missing app controls in the outline"))
-        #expect(result.output.contains("Preflight passed with a content warning"))
-        #expect(!result.output.contains("All checks passed"))
-        #expect(!result.output.contains("FAIL"))
-        #expect(!result.output.contains("FIX"))
-
-        let log = try String(contentsOf: fixture.logFile, encoding: .utf8)
-        #expect(log == "--version\ndevices --json\nui --json --device target-device\n")
-    }
-
-    @Test("empty outline warns without failing or restarting the daemon", arguments: [
-        (response: #"{"ok":true,"data":{"platform":"ios","entries":[],"outline":"App: Test"}}"#, expectsAccessibilityHint: true),
-        (response: #"{"ok":true,"data":{"platform":"android","entries":[],"outline":"App: Test"}}"#, expectsAccessibilityHint: false),
-        (response: #"{"ok":true,"data":{"platform":"android","kind":"physical","entries":[],"outline":"App: Test"}}"#, expectsAccessibilityHint: false),
-    ])
-    func emptyOutlineWarns(_ testCase: (response: String, expectsAccessibilityHint: Bool)) async throws {
-        let fixture = try makeFakeSimUse(versionStamp: "0.16.0", uiResponse: testCase.response)
-        defer { try? FileManager.default.removeItem(at: fixture.tempRoot) }
-
-        let result = try await runPreflight(fakeSimUse: fixture.executable)
-
-        #expect(result.exitCode == 0)
-        #expect(result.output.contains("PASS  sim-use ui returns a valid response"))
-        #expect(result.output.contains("WARN  UI content: empty outline"))
-        #expect(result.output.contains("Missing app controls in the outline"))
-        #expect(result.output.contains("ApplicationAccessibilityEnabled") == testCase.expectsAccessibilityHint)
-        #expect(result.output.contains("Preflight passed with a content warning"))
-        #expect(!result.output.contains("All checks passed"))
-
-        let log = try String(contentsOf: fixture.logFile, encoding: .utf8)
-        #expect(log == "--version\ndevices --json\nui --json --device target-device\n")
-    }
-
-    @Test("successful reads without a content problem keep the existing result", arguments: [
-        #"{"ok":true,"data":{"platform":"ios","entries":[{"role":"StaticText","label":"12:00"}]}}"#,
-        #"{"ok":true,"advisory":null,"data":{"outline":"App: Test"}}"#,
-        #"{"ok":true,"advisory":{"kind":"orientation_calibration_fallback"},"data":{"platform":"ios","entries":[{"role":"Button","label":"OK"}]}}"#,
-        #"{"ok":true,"advisory":{"kind":"full_screen_tap_target"},"data":{"platform":"android","entries":[{"role":"Button","label":"OK"}]}}"#,
-        #"{"ok":true,"data":{"platform":"ios","kind":"physical","entries":[],"lists":[],"outline":"Button: Close"}}"#,
-    ])
-    func successfulReadWithoutContentProblemDoesNotWarn(uiResponse: String) async throws {
-        let fixture = try makeFakeSimUse(versionStamp: "0.16.0", uiResponse: uiResponse)
-        defer { try? FileManager.default.removeItem(at: fixture.tempRoot) }
-
-        let result = try await runPreflight(fakeSimUse: fixture.executable)
-
-        #expect(result.exitCode == 0)
-        #expect(result.output.contains("All checks passed"))
-        #expect(!result.output.contains("WARN"))
-        #expect(!result.output.contains("ApplicationAccessibilityEnabled"))
-    }
-
-    @Test("unsuccessful UI reads still retry and fail", arguments: [
-        (response: #"{"ok":false,"advisory":{"kind":"remote_content_recovery"}}"#, exitCode: 0),
-        (response: #"{"ok":true,"advisory":{"kind":"remote_content_recovery"}}"#, exitCode: 7),
-        (response: "invalid JSON", exitCode: 0),
-    ])
-    func unsuccessfulReadStillFails(_ testCase: (response: String, exitCode: Int)) async throws {
-        let fixture = try makeFakeSimUse(
-            versionStamp: "0.16.0",
-            uiResponse: testCase.response,
-            uiExitCode: testCase.exitCode
-        )
-        defer { try? FileManager.default.removeItem(at: fixture.tempRoot) }
-
-        let result = try await runPreflight(fakeSimUse: fixture.executable)
-
-        #expect(result.exitCode == 1)
-        #expect(result.output.contains("FAIL  sim-use ui returns a valid response"))
-        #expect(result.output.contains("Preflight failed: ui_responds"))
-        #expect(!result.output.contains("WARN"))
-
-        let log = try String(contentsOf: fixture.logFile, encoding: .utf8)
-        #expect(log == "--version\ndevices --json\nui --json --device target-device\ndaemon stop --all\nui --json --device target-device\n")
-    }
-
-    private func runPreflight(fakeSimUse: URL) async throws -> (output: String, exitCode: Int32) {
-        try await CommandRunner.run(
-            "python3 skills/sim-use/scripts/preflight.py --device target-device --sim-use-bin \(fakeSimUse.path)",
+        let result = try await CommandRunner.run(
+            "python3 skills/sim-use/scripts/preflight.py --platform harmonyos --device hdc-target --sim-use-bin \(fixture.executable.path)",
             allowFailure: true
         )
+
+        #expect(result.exitCode == 0, "HarmonyOS preflight should pass: \(result.output)")
+        let log = try fixture.logContents()
+        #expect(log.contains("devices --json --platform harmonyos"))
+        #expect(log.contains("harmonyos ping --device hdc-target --json"))
+        #expect(log.contains("ui --compact --json --device hdc-target --platform harmonyos"))
+        #expect(!log.contains("daemon stop"))
     }
 
-    private func makeFakeSimUse(
-        versionStamp: String,
-        versionExitCode: Int = 0,
-        uiResponse: String = #"{"ok":true,"data":{"outline":"App: Test"}}"#,
-        uiExitCode: Int = 0
-    ) throws -> (tempRoot: URL, executable: URL, logFile: URL) {
-        let tempRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let logFile = tempRoot.appendingPathComponent("sim-use-args.log")
-        let executable = tempRoot.appendingPathComponent("sim-use")
+    @Test("explicit offline devices fail before UI checks")
+    func explicitOfflineDeviceFails() async throws {
+        let fixture = try Fixture(
+            script: successScript(platform: "harmonyos", device: "hdc-target", state: "Offline")
+        )
+        defer { fixture.remove() }
 
-        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
-        try fakeSimUseScript(
-            logFile: logFile.path,
-            versionStamp: versionStamp,
-            versionExitCode: versionExitCode,
-            uiResponse: uiResponse,
-            uiExitCode: uiExitCode
-        ).write(to: executable, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+        let result = try await CommandRunner.run(
+            "python3 skills/sim-use/scripts/preflight.py --platform harmonyos --device hdc-target --sim-use-bin \(fixture.executable.path)",
+            allowFailure: true
+        )
 
-        return (tempRoot, executable, logFile)
+        #expect(result.exitCode != 0)
+        #expect(result.output.contains("state 'offline'"))
+        let log = try fixture.logContents()
+        #expect(!log.contains("harmonyos ping"))
+        #expect(!log.contains("ui --compact"))
     }
 
-    private func fakeSimUseScript(
-        logFile: String,
-        versionStamp: String,
-        versionExitCode: Int,
-        uiResponse: String,
-        uiExitCode: Int
-    ) -> String {
+    @Test("structured command errors preserve error and hint")
+    func structuredErrorsAreVisible() async throws {
+        let script = """
+        #!/bin/bash
+        printf '%s\\n' "$*" >> "__LOG_PATH__"
+        if [[ "$1" == "--version" ]]; then echo '0.11.0'; exit 0; fi
+        if [[ "$1" == "devices" ]]; then
+          echo '{"ok":true,"data":{"devices":[{"deviceId":"hdc-target","name":"Harmony","platform":"harmonyos","state":"Connected"}]}}'
+          exit 0
+        fi
+        if [[ "$1" == "harmonyos" && "$2" == "ping" ]]; then
+          echo '{"ok":true,"data":{"deviceId":"hdc-target","ready":true}}'
+          exit 0
+        fi
+        if [[ "$1" == "ui" ]]; then
+          echo '{"ok":false,"error":"UITest unavailable","hint":"Enable developer mode"}'
+          exit 1
+        fi
+        exit 4
+        """
+        let fixture = try Fixture(script: script)
+        defer { fixture.remove() }
+
+        let result = try await CommandRunner.run(
+            "python3 skills/sim-use/scripts/preflight.py --platform harmonyos --device hdc-target --sim-use-bin \(fixture.executable.path)",
+            allowFailure: true
+        )
+
+        #expect(result.exitCode != 0)
+        #expect(result.output.contains("error: UITest unavailable"))
+        #expect(result.output.contains("hint: Enable developer mode"))
+        #expect(!result.output.contains("attempting autofix"))
+    }
+
+    @Test("external commands are bounded by the configured timeout")
+    func commandTimeout() async throws {
+        let script = """
+        #!/bin/bash
+        sleep 1
+        echo '0.11.0'
+        """
+        let fixture = try Fixture(script: script)
+        defer { fixture.remove() }
+
+        let result = try await CommandRunner.run(
+            "python3 skills/sim-use/scripts/preflight.py --timeout 0.05 --sim-use-bin \(fixture.executable.path)",
+            allowFailure: true
+        )
+
+        #expect(result.exitCode != 0)
+        #expect(result.output.contains("timed out after 0.05s"))
+    }
+
+    @Test("source-build Git identities are accepted as versions")
+    func sourceBuildVersion() async throws {
+        let script = successScript(platform: "ios", device: "target-device", state: "Booted")
+            .replacingOccurrences(of: "echo '0.11.0'", with: "echo '9a83c6f-dirty'")
+        let fixture = try Fixture(script: script)
+        defer { fixture.remove() }
+
+        let result = try await CommandRunner.run(
+            "python3 skills/sim-use/scripts/preflight.py --device target-device --sim-use-bin \(fixture.executable.path)",
+            allowFailure: true
+        )
+
+        #expect(result.exitCode == 0, "source-build identity should pass: \(result.output)")
+        #expect(result.output.contains("sim-use 9a83c6f-dirty"))
+    }
+
+    private func successScript(platform: String, device: String, state: String) -> String {
         """
         #!/bin/bash
-        printf '%s\\n' "$*" >> "\(logFile)"
+        printf '%s\\n' "$*" >> "__LOG_PATH__"
 
         if [[ "$1" == "--version" ]]; then
-          echo "\(versionStamp)"
-          exit \(versionExitCode)
+          echo '0.11.0'
+          exit 0
         fi
 
         if [[ "$1" == "devices" ]]; then
-          if [[ "$*" == *"--device"* ]]; then
-            echo "devices must not receive --device" >&2
-            exit 2
-          fi
-          echo '{"ok":true,"data":{"devices":[{"deviceId":"target-device","name":"Test iPhone","platform":"ios","state":"Booted"}]}}'
+          echo '{"ok":true,"data":{"devices":[{"deviceId":"\(device)","name":"Test Device","platform":"\(platform)","state":"\(state)"}]}}'
+          exit 0
+        fi
+
+        if [[ "$1" == "harmonyos" && "$2" == "ping" ]]; then
+          echo '{"ok":true,"data":{"deviceId":"\(device)","ready":true}}'
           exit 0
         fi
 
         if [[ "$1" == "ui" ]]; then
-          if [[ "$*" != *"--device target-device"* ]]; then
-            echo "ui must receive --device" >&2
-            exit 3
-          fi
-          cat <<'PREFLIGHT_UI_RESPONSE'
-        \(uiResponse)
-        PREFLIGHT_UI_RESPONSE
-          exit \(uiExitCode)
+          echo '{"ok":true,"data":{"platform":"\(platform)","outline":"App: Test  100x200\\n","screen":{"x":0,"y":0,"width":100,"height":200}}}'
+          exit 0
         fi
 
-        if [[ "$*" == "daemon stop --all" ]]; then
+        if [[ "$1" == "screenshot" ]]; then
+          output=''
+          index=1
+          while [[ $index -le $# ]]; do
+            argument="${!index}"
+            if [[ "$argument" == "--output" ]]; then
+              next=$((index + 1))
+              output="${!next}"
+              break
+            fi
+            index=$((index + 1))
+          done
+          printf '\\211PNG\\r\\n\\032\\n' > "$output"
+          echo '{"ok":true,"data":{"path":"screen.png"}}'
+          exit 0
+        fi
+
+        if [[ "$1" == "daemon" && "$2" == "stop" ]]; then
+          echo '{"ok":true,"data":{}}'
           exit 0
         fi
 
         echo "unexpected command: $*" >&2
         exit 4
         """
+    }
+}
+
+private struct Fixture {
+    let directory: URL
+    let executable: URL
+    let log: URL
+
+    init(script: String) throws {
+        directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sim-use-preflight-tests-\(UUID().uuidString)", isDirectory: true)
+        executable = directory.appendingPathComponent("sim-use")
+        log = directory.appendingPathComponent("sim-use-args.log")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let rendered = script.replacingOccurrences(of: "__LOG_PATH__", with: log.path)
+        try rendered.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: executable.path
+        )
+    }
+
+    func logContents() throws -> String {
+        guard FileManager.default.fileExists(atPath: log.path) else { return "" }
+        return try String(contentsOf: log, encoding: .utf8)
+    }
+
+    func remove() {
+        try? FileManager.default.removeItem(at: directory)
     }
 }

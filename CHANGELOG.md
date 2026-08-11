@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ui --json --compact` on the top-level, iOS, Android, and HarmonyOS surfaces. It retains the rendered outline, screen, and foreground identity while removing `raw` and clearing `entries` / `lists`; full alias caches are still written for subsequent `tap @N` calls.
+
 - HarmonyOS emulator and physical-device support through a new `HarmonyOSBackend` built on SDK-provided `hdc`, UITest, and uinput tooling. `sim-use harmonyos` adds target listing / auto-resolution, ping, UI description, alias/selector/coordinate tap, swipe, focused text input, home/back/lock buttons, low-level touch, linear two-finger gestures, and screenshots; the shared top-level verbs route with `--platform harmonyos --device <connect-key>`. The same hdc transport covers DevEco emulators plus USB and TCP devices without installing a bridge app. HarmonyOS outline caches use a platform-qualified key and commands bypass the existing daemon to prevent adb/hdc ID collisions. Unsupported combinations (`keyboard-state`, `record-video`, `app-state`, and rotate presets) fail explicitly.
 - Android Playground fixture app (`Playgrounds/Android`, `com.linecorp.simuse.playground`) and Android device E2E suites (AndroidTap/SwipeScroll/Type/KeyboardState/MultiTouch/Button/DescribeUI) gated by `SIM_USE_E2E_ANDROID=1` + `ANDROID_SERIAL`. `make e2e-android` builds the APK, installs it, runs `sim-use android init`, and executes the suites one-by-one with a pass/fail summary (`scripts/build-playground-android.sh`, `scripts/test-runner-android.sh`).
 - iOS Playground gains three screens with matching E2E suites: `paste-test` + PasteTests (Cmd+V and `--via-menu` paths, unicode, `--replace`, Allow-Paste alert handling), `orientation-test` + OrientationTests (AX-selector taps land correctly after programmatic rotation — exercises orientation self-calibration), and `permissions-test` + PermissionAlertTests (real location permission alert raised, classified via the `App: SpringBoard` header, dismissed through sim-use on both allow and deny paths).
@@ -16,9 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `make eval` / `pnpm eval` wrappers that check the environment, estimate the (real `claude -p`) cost, and confirm before running the agent evals.
 - E2E confidence-suite design note under `docs/ai/`; the release skill's pre-flight now requires a green `make e2e` run.
 
+### Changed
+
+- HarmonyOS `App:` identity now renders `bundleName/abilityName` instead of the generic ability name alone, and `sim-use harmonyos tap` reuses the shared selector/timing options including `--pre-delay`, `--post-delay`, `--wait-timeout`, and `--poll-interval`.
+- The bundled non-interactive preflight now validates the sim-use version, ready device state, compact UI schema, and PNG screenshot; HarmonyOS additionally validates hdc ping without attempting daemon recovery. External calls have timeouts and retain structured CLI error/hint diagnostics.
+- The tap family (`tap`, `long-press`, `ios tap`) declares its shared flags once via `TapTargetingOptions` / `TapTimingOptions` option groups instead of three hand-kept copies (#42). Flag names, defaults, validation messages, and `--json` envelopes are unchanged.
+
 Notarized Homebrew packages retain their original Developer ID signature after installation.
 
 ### Fixed
+
+- `make e2e` now runs both the iOS and Android E2E suites in sequence, continuing past a platform failure and failing if either does.
+- `scripts/test-runner.sh` keeps running after a failed suite and prints a full pass/fail map at the end.
 
 - HarmonyOS `tap @N` now promotes a non-clickable leaf (for example, an app-name `StaticText` on the launcher) to the center of its nearest enabled clickable ancestor when writing the outline cache. The printed / JSON frame remains the leaf's real semantic frame, disabled ancestors do not get bypassed, and near-full-screen structural wrappers are not promoted. Re-run `ui` once after upgrading to refresh existing HarmonyOS alias caches.
 

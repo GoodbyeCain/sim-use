@@ -29,6 +29,7 @@ Every interaction follows the same cycle: **observe → act → verify**.
 
 ```bash
 sim-use ui --device <UDID>
+sim-use ui --json --compact --device <UDID>  # agent-friendly JSON
 ```
 
 Read the outline. Each element has an `@N` alias and optionally a `#<id>` identifier. List cells carry `#N` (dominant list) or `#N@M` (scoped).
@@ -52,7 +53,7 @@ Disambiguate collisions with `--element-type` or `--frame minY=0.7r` (see `refer
 
 ### Verify
 
-Always verify after acting — commands are fire-and-forget:
+Always verify after acting. `ok:true` means the command was dispatched successfully; it does not assert that the app changed state:
 
 ```bash
 sim-use ui --device <UDID>       # read the new screen state
@@ -80,7 +81,7 @@ Every byte of command output you read costs context. Defaults that keep the loop
 | Hardware button | `sim-use button home --device <UDID>` |
 | Android back | `sim-use button back --device <UDID>` |
 | Wait for animation | `sleep 0.4` between commands, or `--pre-delay 0.5` |
-| Toggle/switch | `sim-use tap @N --duration 0.05 --device <UDID>` (UISwitch needs a brief hold) |
+| Toggle/switch | `sim-use tap @N --duration 0.1 --device <UDID>` when the backend default is too brief |
 | Swipe | `sim-use swipe --from 50,500 --to 350,500 --device <UDID>` |
 | Pinch zoom in | `sim-use gesture pinch-out --device <UDID>` (two-finger spread) |
 | Rotate (two-finger gesture) | `sim-use gesture rotate-cw --angle 90 --device <UDID>` |
@@ -143,7 +144,7 @@ Quick symptom index — see `references/pitfalls.md` for detailed recipes.
 |---|---|---|
 | `tap --label` hits wrong element | Label collision (e.g. header and tab bar share text) | Add `--frame minY=0.7r` or `--element-type` to narrow |
 | `tap @N` fails after navigation | Alias cache is stale | Re-run `ui` before tapping |
-| `App:` line shows wrong app | System layer (alert, share sheet) is on top | Dismiss it first, then re-run `ui` |
+| `App:` identity shows another app/system component | An alert, share sheet, or navigation opened another foreground component | Inspect the outline, dismiss or navigate back, then re-run `ui` |
 | `multipleMatches` error | Several elements share the selector | Use `--frame`, `--element-type`, or a more specific selector |
 | Tap lands but nothing happens | Animation in progress, or element not yet interactive | Add `--pre-delay 0.3` or `--wait-timeout 3` |
 | iOS: `paste` fails or text is missing | No focused field, a custom edit menu, a paste prompt, or an external clipboard writer | Focus the field, or use `paste --via-menu --target-id <id>`; inspect prompts and verify the actual field. Do not switch to `type` as a Unicode substitute |
