@@ -22,6 +22,10 @@ enum DTXFraming {
         var channelCode: UInt32 = 0
         var expectsReply: UInt32 = 0
 
+        /// Requests and unsolicited events start a conversation at index zero.
+        /// Only a positive index can be correlated with a pending request.
+        var isReply: Bool { conversationIndex > 0 }
+
         var encoded: Data {
             var data = Data(capacity: DTXFraming.headerSize)
             data.appendLittleEndian(magic)

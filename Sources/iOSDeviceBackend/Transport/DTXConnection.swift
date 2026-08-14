@@ -17,8 +17,9 @@ import os
 /// with `Protocol not supported`; a plain fd is full duplex.
 ///
 /// The daemon also pushes unsolicited events (focus changes, app state) down
-/// the same channel; those carry identifiers nobody is waiting on and are
-/// dropped.
+/// the same channel. Each peer allocates identifiers independently, so an event
+/// can collide with a pending request identifier; `conversationIndex` separates
+/// new messages from replies and events are dropped.
 public final class DTXConnection: DTXInvoking, Sendable {
     private struct State {
         var pending: [UInt32: CheckedContinuation<DTXFraming.Reply, Error>] = [:]
@@ -155,8 +156,11 @@ public final class DTXConnection: DTXInvoking, Sendable {
             while !Task.isCancelled {
                 do {
                     let (header, payload) = try readMessage()
-                    guard !payload.isEmpty else { continue }
-                    resume(identifier: header.identifier, with: .success(try DTXFraming.decodePayload(payload)))
+                    guard header.isReply else { continue }
+                    let reply = payload.isEmpty
+                        ? DTXFraming.Reply(returnValue: nil, auxiliaryValues: [])
+                        : try DTXFraming.decodePayload(payload)
+                    resume(identifier: header.identifier, with: .success(reply))
                 } catch {
                     close(because: error)
                     return

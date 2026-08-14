@@ -9,7 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `sim-use ios-device` (experimental): drive a **physical** iPhone or iPad. `devices` lists attached devices, `ui` prints an outline of the foreground app's accessibility tree, and `tap --text` activates a matching element. The device is reached through its accessibility audit daemon over usbmux lockdown, so nothing is installed on it, nothing is code signed, and no Developer Disk Image is needed — but the device must be unlocked. This channel exposes no element geometry, so there is no coordinate tap, swipe or gesture: interaction goes through accessibility actions, and the outline is ordered by the accessibility reading order rather than by screen position.
+- `sim-use ios-device` (experimental): drive a development-signed app on a physical iPhone or iPad. `devices` lists attached devices, `ui` prints the foreground app's accessibility tree, and `tap --label` / `--label-contains` sends Activate to one unambiguous match. sim-use installs and signs no runner and needs no Developer Disk Image; the device must be unlocked and the target app must have `get-task-allow=true`. This channel intentionally omits coordinate tap, swipe and gesture because the daemon exposes no element geometry.
+
+### Fixed
+
+- Wait for physical-device attachment notifications to settle so multiple USB-connected iOS devices are all discovered.
+- Reject empty physical-device hierarchies, missing or ambiguous tap targets, and invalid hierarchy concurrency instead of reporting success or silently choosing an element.
+- Correlate DTX replies by both identifier and conversation index so unsolicited device events cannot satisfy an unrelated pending request.
 
 ## [0.13.0] - 2026-08-06
 

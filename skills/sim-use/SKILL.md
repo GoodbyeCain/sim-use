@@ -17,7 +17,7 @@ This verifies sim-use is installed, the device is reachable, and the daemon is h
 2. `sim-use devices` — confirm the target device is listed and booted/connected.
 3. `sim-use ui --device <UDID>` — confirm you can read the screen.
 
-`--device` is optional when only one simulator is booted or one daemon is running. For Android, run `sim-use android init --device <serial>` once to install the bridge APK.
+`--device` is optional when only one simulator is booted or one daemon is running. For Android, run `sim-use android init --device <serial>` once to install the bridge APK. Physical iOS devices use the separate experimental preflight shown below; do not route them through these top-level commands.
 
 ## 1. The observe-act loop
 
@@ -86,23 +86,33 @@ Every byte of command output you read costs context. Defaults that keep the loop
 
 ### Physical iOS devices (experimental)
 
-A connected iPhone or iPad uses a **separate command surface**, `sim-use ios-device`. The top-level verbs do not route to it.
+Use the separate `sim-use ios-device` surface. Never route a physical iPhone or iPad through the top-level or `sim-use ios` verbs.
+
+**Hard requirement:** the device must be paired, trusted, unlocked and in Developer Mode, and the foreground target app must be development-signed with `get-task-allow=true`. A Release-configuration binary installed with a Development profile is supported. Distribution/Ad Hoc, TestFlight, App Store and system apps are unsupported; do not retry them or claim success. sim-use itself installs and signs no runner and needs no Developer Disk Image.
 
 ```bash
-sim-use ios-device devices          # UDID or ECID; --device optional when one is attached
-sim-use ios-device ui               # outline of the foreground app
-sim-use ios-device ui --fast        # ~40% quicker, ~25% fewer elements
-sim-use ios-device tap --text "Friends"
+# Physical-device preflight
+sim-use ios-device devices
+sim-use ios-device ui --device <UDID>
+
+# Observe → act → verify
+sim-use ios-device ui --device <UDID>
+sim-use ios-device tap --label "Friends" --element-type Button --device <UDID>
+sim-use ios-device ui --device <UDID>
+
+# For dynamic labels
+sim-use ios-device tap --label-contains "Reply" --element-type Button --device <UDID>
 ```
 
-The loop is observe → act → verify as usual, but four things differ and they change how you drive it:
+Rules for this experimental surface:
 
-1. **The device must be unlocked.** Locked looks like success: the connection is accepted and then every element query comes back empty.
-2. **Tap by text, not by alias.** Element handles die with the connection, so `@N` from a previous `ui` is meaningless. `tap --text` re-resolves the target inside one session.
-3. **No coordinates.** There is no frame data, so no coordinate tap, `swipe`, `gesture` or `multi-touch`. Reach things by activating them; scrolling and app-defined swipe actions are accessibility actions here.
-4. **Budget seconds, not milliseconds.** A full tree is a few seconds — the device serialises the requests. Don't poll it in a tight loop.
+1. **Treat hierarchy errors as capability failures.** If the command says the hierarchy is unavailable, confirm the screen is unlocked and inspect the installed app's final `get-task-allow` entitlement. Do not fall back to coordinates or focus walking.
+2. **Tap by standard label selectors, not aliases.** Element handles expire with the DTX connection, so the outline deliberately has no `@N`. Use `--label` for exact text, `--label-contains` for dynamic text, and `--element-type` to disambiguate.
+3. **Always verify.** Activate is fire-and-forget. Re-run `sim-use ios-device ui` and confirm the expected state before continuing.
+4. **No geometry or simulator-only verbs.** Coordinate tap, swipe, gesture, multi-touch, type, screenshot, recording and `--json` are unavailable here. Do not substitute a similarly named top-level command.
+5. **Budget seconds, not milliseconds.** A full tree takes a few seconds. `ui --fast` is quicker but omits nested elements; do not poll in a tight loop.
 
-Everything else (`screenshot`, `record-video`, the simulator verbs) is unavailable on this surface for now.
+If `ui` succeeds with zero elements or `tap` prints success for a missing/ambiguous label, treat it as a sim-use bug; the command is expected to fail loudly instead.
 
 ## 2. Pitfalls
 

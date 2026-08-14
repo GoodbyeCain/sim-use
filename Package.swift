@@ -138,9 +138,10 @@ let package = Package(
             plugins: ["VersionPlugin"]
         ),
         // Physical iOS devices, driven over the accessibility audit daemon
-        // (usbmux lockdown -> DTX). No XCUITest runner, so no code signing and
-        // no Developer Disk Image — but also no element geometry, which is why
-        // this target does not share iOSSimBackend's frame-based machinery.
+        // (usbmux lockdown -> DTX). sim-use installs no XCUITest runner and
+        // needs no Developer Disk Image; the target app must already be
+        // development-signed. With no element geometry, this target cannot
+        // share iOSSimBackend's frame-based machinery.
         .target(
             name: "iOSDeviceBackend",
             dependencies: [

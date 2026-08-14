@@ -9,7 +9,6 @@ import Foundation
 /// is arguably a better ordering to hand an agent than y-coordinates.
 public struct DeviceOutline {
     public struct Row {
-        public let alias: Int
         public let depth: Int
         public let role: String
         public let label: String
@@ -30,7 +29,6 @@ public struct DeviceOutline {
             let depth = parentDepth + 1
             depths[index] = depth
             rows.append(Row(
-                alias: rows.count + 1,
                 depth: depth,
                 role: element.role,
                 label: Self.label(from: element.summary, role: element.role)
@@ -42,14 +40,13 @@ public struct DeviceOutline {
     public func rendered() -> String {
         rows.map { row in
             let indent = String(repeating: "  ", count: min(row.depth, 8))
-            let alias = "@\(row.alias)".padding(toLength: 5, withPad: " ", startingAt: 0)
-            return "\(alias)\(indent)\(row.role)  \(row.label.isEmpty ? "" : "\"\(row.label)\"")"
+            return "\(indent)\(row.role)  \(row.label.isEmpty ? "" : "\"\(row.label)\"")"
         }.joined(separator: "\n")
     }
 
     /// The daemon's description already ends with the role ("Chats Button,
     /// Selected"), and repeating it in the rendered row is noise.
-    private static func label(from summary: String, role: String) -> String {
+    static func label(from summary: String, role: String) -> String {
         guard !role.isEmpty else { return summary }
         let trimmed = summary.hasSuffix(role)
             ? String(summary.dropLast(role.count))

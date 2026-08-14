@@ -4,35 +4,64 @@ import FBDeviceControl
 import Foundation
 
 public enum DeviceSessionError: Error, LocalizedError, CustomStringConvertible {
-    case deviceNotFound(udid: String, available: [String])
+    case noDevices
+    case selectionRequired(available: [String])
+    case deviceNotFound(identifier: String, available: [String])
     case serviceUnavailable(underlying: Error)
 
     public var errorDescription: String? { description }
 
     public var description: String {
         switch self {
-        case let .deviceNotFound(udid, available):
+        case .noDevices:
+            return "no physical iOS devices are connected"
+        case let .selectionRequired(available):
+            return "multiple physical iOS devices are connected (\(available.joined(separator: ", "))); specify --device with a UDID or ECID"
+        case let .deviceNotFound(identifier, available):
             let known = available.isEmpty ? "none connected" : available.joined(separator: ", ")
-            return "no physical iOS device with UDID \(udid) (connected: \(known))"
+            return "no physical iOS device with identifier \(identifier) (connected: \(known))"
         case let .serviceUnavailable(underlying):
             return "could not open the accessibility service on the device: \(underlying.localizedDescription)"
         }
     }
 }
 
+private struct DeviceOperationFailure: Error {
+    let underlying: any Error
+}
+
+/// Tracks attachment identities until the set has stayed unchanged long
+/// enough to include notifications delivered in the same discovery burst.
+struct AttachmentQuiescence<Identity: Hashable> {
+    let quietInterval: TimeInterval
+
+    private var observed: Set<Identity> = []
+    private var settleAfter: Date?
+
+    init(quietInterval: TimeInterval) {
+        self.quietInterval = quietInterval
+    }
+
+    mutating func observe(_ identities: Set<Identity>, at date: Date) -> Bool {
+        if identities != observed {
+            observed = identities
+            settleAfter = identities.isEmpty ? nil : date.addingTimeInterval(quietInterval)
+        }
+        return !identities.isEmpty && settleAfter.map { date >= $0 } == true
+    }
+}
+
 /// Opens the accessibility audit daemon on a physical device and scopes it to
 /// one piece of work.
 ///
-/// Nothing is installed on the device and nothing is signed: the service is
-/// reached over plain usbmux lockdown. The device does need to be unlocked —
-/// a locked screen answers connections but reports no elements.
+/// sim-use installs and signs no runner: the service is reached over plain
+/// usbmux lockdown without a Developer Disk Image. The target app must already
+/// be development-signed (`get-task-allow=true`) and the device unlocked.
 public enum DeviceSession {
-    /// The `.DVTSecureSocketProxy` variant terminates TLS on the lockdown side,
-    /// so the DTX stream underneath is plaintext. Without it the daemon expects
-    /// a stripped-SSL channel and the first frame decodes as garbage.
-    /// There is no `.DVTSecureSocketProxy` variant of this service — lockdown
-    /// rejects it with "the service is invalid" — so TLS is stripped on our
-    /// side instead, in `DTXConnection`.
+    /// This service has no `.DVTSecureSocketProxy` variant — lockdown rejects
+    /// that name as invalid. The base service still expects plaintext DTX after
+    /// startup, so `DTXConnection` talks to the raw socket rather than sending
+    /// frames back through the service connection's SSL context.
     static let serviceName = "com.apple.accessibility.axAuditDaemon.remoteserver"
 
     public struct DeviceSummary: Sendable {
@@ -42,9 +71,10 @@ public enum DeviceSession {
         public let state: String
     }
 
+    @MainActor
     public static func connectedDevices(logger: FBControlCoreLogger? = nil) async throws -> [DeviceSummary] {
-        let set = try await MainActor.run { try deviceSet(logger: logger) }
-        return await settled(set).map {
+        let set = try deviceSet(logger: logger)
+        return attachedDevices(set).map {
             DeviceSummary(
                 udid: $0.identity,
                 name: $0.name,
@@ -54,14 +84,15 @@ public enum DeviceSession {
         }
     }
 
+    @MainActor
     public static func withClient<Result>(
         udid: String?,
         connections poolSize: Int = 1,
         logger: FBControlCoreLogger? = nil,
         body: (AXAuditClient) async throws -> Result
     ) async throws -> Result {
-        let set = try await MainActor.run { try deviceSet(logger: logger) }
-        let device = try resolve(udid, among: await settled(set))
+        let set = try deviceSet(logger: logger)
+        let device = try resolve(udid, among: attachedDevices(set))
 
         do {
             return try await withConnections(to: device, count: max(1, poolSize)) { dtx in
@@ -76,9 +107,14 @@ public enum DeviceSession {
                     return result
                 } catch {
                     await client.finish()
-                    throw error
+                    throw DeviceOperationFailure(underlying: error)
                 }
             }
+        } catch let failure as DeviceOperationFailure {
+            // Command/runtime errors belong to the operation, not service
+            // setup. Preserve their type and message so ArgumentParser emits a
+            // normal exit-1 error instead of a misleading connection failure.
+            throw failure.underlying
         } catch let error as DeviceSessionError {
             throw error
         } catch {
@@ -88,6 +124,7 @@ public enum DeviceSession {
 
     /// Opens `count` service connections and tears them all down afterwards.
     /// Nesting the contexts keeps each one scoped without hand-rolled cleanup.
+    @MainActor
     private static func withConnections<Result>(
         to device: FBDevice,
         count: Int,
@@ -117,38 +154,38 @@ public enum DeviceSession {
     @MainActor
     private static func attachedDevices(_ set: FBDeviceSet, timeout: TimeInterval = 5) -> [FBDevice] {
         let deadline = Date().addingTimeInterval(timeout)
+        var attached: [FBDevice] = []
+        var quiescence = AttachmentQuiescence<ObjectIdentifier>(quietInterval: 0.25)
+
         while Date() < deadline {
-            let attached = set.allDevices.filter { $0.amDevice != nil }
-            if !attached.isEmpty { return attached }
             CFRunLoopRunInMode(.defaultMode, 0.05, true)
+
+            attached = set.allDevices.filter { $0.amDevice != nil }
+            let identities = Set(attached.map { ObjectIdentifier($0) })
+            if quiescence.observe(identities, at: Date()) {
+                return attached
+            }
         }
-        return set.allDevices
+        return attached.isEmpty ? set.allDevices : attached
     }
 
     /// AMDevice does not publish the lockdown UDID until a session is opened,
     /// so a connected device is identified by its ECID until then. Accept
     /// either, and default to the only device when there is just one.
     private static func resolve(_ identifier: String?, among devices: [FBDevice]) throws -> FBDevice {
+        guard !devices.isEmpty else { throw DeviceSessionError.noDevices }
+        let available = devices.map(\.identity)
+
         guard let identifier else {
             guard devices.count == 1, let only = devices.first else {
-                throw DeviceSessionError.deviceNotFound(
-                    udid: "<unspecified>",
-                    available: devices.map { $0.identity }
-                )
+                throw DeviceSessionError.selectionRequired(available: available)
             }
             return only
         }
         guard let device = devices.first(where: { $0.udid == identifier || $0.uniqueIdentifier == identifier }) else {
-            throw DeviceSessionError.deviceNotFound(udid: identifier, available: devices.map { $0.identity })
+            throw DeviceSessionError.deviceNotFound(identifier: identifier, available: available)
         }
         return device
-    }
-
-    /// `FBDeviceSet` discovers devices through AMDevice notifications delivered
-    /// on the main queue, so a set read immediately after construction is
-    /// always empty. Yield until the first device lands.
-    private static func settled(_ set: FBDeviceSet) async -> [FBDevice] {
-        await MainActor.run { attachedDevices(set) }
     }
 
     @MainActor

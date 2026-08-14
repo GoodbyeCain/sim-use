@@ -2,15 +2,91 @@
 import ArgumentParser
 import Foundation
 
+enum IOSDeviceCommandError: Error, LocalizedError, CustomStringConvertible {
+    case noMatchingElement(selector: String, available: [String])
+    case multipleMatches(selector: String, matches: [String])
+    case missingSelector
+
+    var errorDescription: String? { description }
+
+    var description: String {
+        switch self {
+        case let .noMatchingElement(selector, available):
+            let candidates = available.isEmpty ? "none" : available.joined(separator: ", ")
+            return "no accessibility element matched \(selector) on screen (available: \(candidates)); run 'sim-use ios-device ui' and choose a visible label"
+        case let .multipleMatches(selector, matches):
+            return "\(selector) matched multiple accessibility elements (\(matches.joined(separator: ", "))); use --label for an exact match or add --element-type"
+        case .missingSelector:
+            return "tap requires exactly one of --label or --label-contains"
+        }
+    }
+}
+
+struct DeviceTapTargetResolver {
+    static func resolve(
+        _ elements: [DeviceElement],
+        label: String?,
+        labelContains: String?,
+        elementType: String?
+    ) throws -> DeviceElement {
+        let selectorDescription: String
+        let matchesLabel: (String) -> Bool
+
+        if let label {
+            selectorDescription = "--label '\(label)'"
+            matchesLabel = { $0.localizedCaseInsensitiveCompare(label) == .orderedSame }
+        } else if let labelContains {
+            selectorDescription = "--label-contains '\(labelContains)'"
+            matchesLabel = { $0.localizedCaseInsensitiveContains(labelContains) }
+        } else {
+            throw IOSDeviceCommandError.missingSelector
+        }
+
+        let accessible = elements.filter(\.isAccessibilityElement)
+        let matches = accessible.filter { element in
+            matchesLabel(DeviceOutline.label(from: element.summary, role: element.role))
+                && elementType.map {
+                    element.role.localizedCaseInsensitiveCompare($0) == .orderedSame
+                } != false
+        }
+
+        guard !matches.isEmpty else {
+            throw IOSDeviceCommandError.noMatchingElement(
+                selector: selectorDescription,
+                available: Array(accessible.prefix(8).map(describe))
+            )
+        }
+        if matches.count == 1 { return matches[0] }
+
+        // Hierarchies commonly contain a button and a nested static-text node
+        // with the same label. Match the actionable button just as the regular
+        // simulator resolver prefers actionable elements.
+        let buttons = matches.filter { $0.role.localizedCaseInsensitiveContains("button") }
+        if buttons.count == 1 { return buttons[0] }
+
+        throw IOSDeviceCommandError.multipleMatches(
+            selector: selectorDescription,
+            matches: Array(matches.prefix(8).map(describe))
+        )
+    }
+
+    private static func describe(_ element: DeviceElement) -> String {
+        "'\(DeviceOutline.label(from: element.summary, role: element.role))' [\(element.role)]"
+    }
+}
+
 public struct IOSDeviceCommand: AsyncParsableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "ios-device",
         abstract: "Physical iOS device subcommands (experimental).",
         discussion: """
-        Drives a connected iPhone or iPad through the accessibility audit
-        daemon. Nothing is installed on the device and nothing is signed, but
-        the device must be unlocked — a locked screen accepts the connection
-        and then reports no elements.
+        Experimental support for driving a connected iPhone or iPad through
+        the accessibility audit daemon. sim-use installs and signs no runner,
+        and needs no Developer Disk Image. The device must be paired, trusted,
+        unlocked and in Developer Mode; the foreground app must be
+        development-signed (get-task-allow=true).
+        Distribution-signed and system apps are unsupported. A Release build
+        remains supported when installed with a Development profile.
 
         Element geometry is not available on this channel, so there is no
         coordinate tap, swipe or gesture here; interaction goes through
@@ -62,6 +138,11 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
         @Flag(help: "Stop descending at labelled elements. Faster, but misses nested text.")
         var fast = false
 
+        func validate() throws {
+            guard concurrency > 0 else { throw ValidationError("--concurrency must be greater than zero") }
+            guard connections > 0 else { throw ValidationError("--connections must be greater than zero") }
+        }
+
         func run() async throws {
             let started = Date()
             let (outline, total) = try await DeviceSession.withClient(udid: device.udid, connections: connections) { client in
@@ -77,32 +158,53 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
     struct Tap: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "tap",
-            abstract: "Activate the first element whose label contains the given text.",
+            abstract: "Activate an element by accessibility label.",
             discussion: """
-            The element is resolved and activated inside a single connection:
-            element handles encode a live pointer, so they cannot be carried
-            across processes the way a simulator alias can.
+            Uses the same --label, --label-contains and --element-type
+            vocabulary as the regular tap command. The element is resolved and
+            activated inside one connection because physical-device element
+            handles cannot be reused by a later process. The action is
+            fire-and-forget; run 'sim-use ios-device ui' again to verify.
             """
         )
 
         @OptionGroup var device: DeviceOptions
 
-        @Option(name: .customLong("text"), help: "Substring to match against element labels.")
-        var text: String
+        @Option(help: "Exact rendered label from ios-device ui.")
+        var label: String?
+
+        @Option(help: "Case-insensitive substring of an element label.")
+        var labelContains: String?
+
+        @Option(help: "Accessibility role used to disambiguate matching labels, for example Button.")
+        var elementType: String?
+
+        func validate() throws {
+            let selectors = [label, labelContains].compactMap { $0 }
+            guard selectors.count == 1 else {
+                throw ValidationError("specify exactly one of --label or --label-contains")
+            }
+            guard selectors[0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+                throw ValidationError("accessibility labels cannot be empty")
+            }
+            if let elementType, elementType.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                throw ValidationError("--element-type cannot be empty")
+            }
+        }
 
         func run() async throws {
-            let matched = try await DeviceSession.withClient(udid: device.udid) { client -> String? in
+            let matched = try await DeviceSession.withClient(udid: device.udid) { client in
                 let elements = try await DeviceTreeFetcher(client: client).fetchTree()
-                guard let target = elements.first(where: {
-                    $0.isAccessibilityElement && $0.summary.localizedCaseInsensitiveContains(text)
-                }) else { return nil }
+                let target = try DeviceTapTargetResolver.resolve(
+                    elements,
+                    label: label,
+                    labelContains: labelContains,
+                    elementType: elementType
+                )
                 try await client.perform(.activate, on: target.element)
                 return target.summary
             }
-            guard let matched else {
-                throw ValidationError("no accessibility element matching '\(text)' on screen")
-            }
-            print("✓ Activated \(matched)")
+            print("Sent Activate to \(matched)")
         }
     }
 }

@@ -52,7 +52,7 @@ public struct DeviceTreeFetcher: Sendable {
         var depth = 0
 
         while !frontier.isEmpty, discovered.count < nodeLimit {
-            let expansions = await expand(frontier.map(\.element))
+            let expansions = try await expand(frontier.map(\.element))
             var next: [(element: AXAuditElement, index: Int?)] = []
 
             for (offset, children) in expansions.enumerated() {
@@ -80,18 +80,18 @@ public struct DeviceTreeFetcher: Sendable {
             depth += 1
         }
 
+        guard !discovered.isEmpty else { throw AXAuditError.hierarchyUnavailable }
         return discovered
     }
 
-    private func expand(_ elements: [AXAuditElement]) async -> [[AXAuditNode]] {
-        await withTaskGroup(of: (Int, [AXAuditNode]).self) { group in
+    private func expand(_ elements: [AXAuditElement]) async throws -> [[AXAuditNode]] {
+        try await withThrowingTaskGroup(of: (Int, [AXAuditNode]).self) { group in
             var results = [[AXAuditNode]](repeating: [], count: elements.count)
             var next = 0
 
             func addTask(_ index: Int) {
                 group.addTask {
-                    let children = try? await client.children(of: elements[index])
-                    return (index, children ?? [])
+                    (index, try await client.children(of: elements[index]))
                 }
             }
 
@@ -99,7 +99,7 @@ public struct DeviceTreeFetcher: Sendable {
                 addTask(next)
                 next += 1
             }
-            while let (index, children) = await group.next() {
+            while let (index, children) = try await group.next() {
                 results[index] = children
                 if next < elements.count {
                     addTask(next)

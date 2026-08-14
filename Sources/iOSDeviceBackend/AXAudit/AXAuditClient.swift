@@ -19,6 +19,7 @@ public extension DTXInvoking {
 
 public enum AXAuditError: Error, LocalizedError, CustomStringConvertible {
     case noRootElement
+    case hierarchyUnavailable
     case unsupportedSelector(String)
     case malformedReply(selector: String)
 
@@ -27,7 +28,9 @@ public enum AXAuditError: Error, LocalizedError, CustomStringConvertible {
     public var description: String {
         switch self {
         case .noRootElement:
-            return "the foreground app exposed no root accessibility element — unlock the device and try again"
+            return "the foreground app exposed no root accessibility element — ensure the device is unlocked and the app is development-signed (get-task-allow=true)"
+        case .hierarchyUnavailable:
+            return "the foreground app exposed no accessibility hierarchy — ensure the device is unlocked and use a development-signed app with get-task-allow=true; distribution-signed and system apps are unsupported"
         case let .unsupportedSelector(selector):
             return "the device does not support '\(selector)'"
         case let .malformedReply(selector):
@@ -38,9 +41,10 @@ public enum AXAuditError: Error, LocalizedError, CustomStringConvertible {
 
 /// Selector-level API for `com.apple.accessibility.axAuditDaemon.remoteserver`.
 ///
-/// Reachable over plain usbmux lockdown: no runner app, no code signing and no
-/// Developer Disk Image. Element geometry is not available on this channel at
-/// any iOS version measured, so there is intentionally no frame accessor.
+/// Reachable over plain usbmux lockdown: sim-use installs and signs no runner
+/// and needs no Developer Disk Image. The foreground target app must itself be
+/// development-signed (`get-task-allow=true`). Element geometry is unavailable
+/// on this channel, so there is intentionally no frame accessor.
 public struct AXAuditClient: Sendable {
     private let transport: any DTXInvoking
 
