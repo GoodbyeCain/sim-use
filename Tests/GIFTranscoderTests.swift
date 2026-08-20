@@ -111,7 +111,7 @@ struct GIFTranscoderTests {
         #expect(gif.fps == 10)
         #expect(gif.gifSampleFPS == 10)
         #expect(gif.scale == 0.5)
-        #expect(gif.gifMarkers) // default on
+        #expect(!gif.gifMarkers) // opt-in, default off
 
         let inferred = Options(format: nil, output: "demo.gif", fps: nil, scale: nil)
         #expect(inferred.format == .gif)
@@ -202,7 +202,7 @@ struct GIFTranscoderTests {
             .appendingPathComponent("gif-transcoder-test-\(UUID().uuidString).gif")
         defer { try? FileManager.default.removeItem(at: gifURL) }
 
-        let written = try await GIFTranscoder.transcode(mp4URL: mp4URL, to: gifURL, fps: 10, markers: false)
+        let written = try await GIFTranscoder.transcode(mp4URL: mp4URL, to: gifURL, fps: 10)
 
         let source = try #require(CGImageSourceCreateWithURL(gifURL as CFURL, nil))
         let type = try #require(CGImageSourceGetType(source) as String?)
@@ -234,12 +234,12 @@ struct GIFTranscoderTests {
             .appendingPathComponent("gif-transcoder-test-\(UUID().uuidString).gif")
         defer { try? FileManager.default.removeItem(at: gifURL) }
 
-        let written = try await GIFTranscoder.transcode(mp4URL: mp4URL, to: gifURL, fps: 10, markers: false)
+        let written = try await GIFTranscoder.transcode(mp4URL: mp4URL, to: gifURL, fps: 10)
         #expect(written >= 8 && written <= 12)
         #expect(CGImageSourceGetCount(try #require(CGImageSourceCreateWithURL(gifURL as CFURL, nil))) == written)
     }
 
-    @Test("Markers bracket the GIF with START/END cards by default")
+    @Test("Opt-in markers bracket the GIF with START/END cards")
     func transcodeAddsMarkerCards() async throws {
         let mp4URL = try await makeSyntheticMP4(frameCount: 10, fps: 10)
         defer { try? FileManager.default.removeItem(at: mp4URL) }
@@ -247,7 +247,7 @@ struct GIFTranscoderTests {
             .appendingPathComponent("gif-transcoder-test-\(UUID().uuidString).gif")
         defer { try? FileManager.default.removeItem(at: gifURL) }
 
-        let written = try await GIFTranscoder.transcode(mp4URL: mp4URL, to: gifURL, fps: 10)
+        let written = try await GIFTranscoder.transcode(mp4URL: mp4URL, to: gifURL, fps: 10, markers: true)
 
         let source = try #require(CGImageSourceCreateWithURL(gifURL as CFURL, nil))
         let frameCount = CGImageSourceGetCount(source)

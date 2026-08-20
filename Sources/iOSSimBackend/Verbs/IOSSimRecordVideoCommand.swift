@@ -50,8 +50,8 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
     @Option(help: "Output format: mp4, gif. Defaults to the --output extension when recognized, else mp4.")
     public var format: RecordingFormat?
 
-    @Flag(inversion: .prefixedNo, help: "Bracket a GIF with START/END marker frames (default: enabled; ignored for mp4).")
-    public var gifMarkers: Bool = true
+    @Flag(help: "Bracket a GIF with START/END marker frames (opt-in; ignored for mp4).")
+    public var gifMarkers: Bool = false
 
     @Option(help: "Output file path. Defaults to sim-use-video-<timestamp>.<format> in the current directory.")
     public var output: String?

@@ -131,12 +131,12 @@ public enum GIFTranscoder {
     static let markerDelay: Double = 1.0
 
     /// Transcode `mp4URL` into an animated GIF at `gifURL`, sampling at
-    /// `fps` (capped at `maximumFPS`). With `markers` (the default), the
-    /// clip is bracketed by START/END card frames so a forever-looping
-    /// GIF has a visible boundary. Returns the number of frames actually
+    /// `fps` (capped at `maximumFPS`). With `markers` (opt-in), the clip
+    /// is bracketed by START/END card frames so a forever-looping GIF
+    /// has a visible boundary. Returns the number of frames actually
     /// written, marker cards included.
     @discardableResult
-    public static func transcode(mp4URL: URL, to gifURL: URL, fps: Int, markers: Bool = true) async throws -> Int {
+    public static func transcode(mp4URL: URL, to gifURL: URL, fps: Int, markers: Bool = false) async throws -> Int {
         let asset = AVURLAsset(url: mp4URL)
         guard let track = try await asset.loadTracks(withMediaType: .video).first else {
             throw GIFTranscoderError.noVideoTrack
@@ -203,7 +203,7 @@ public enum GIFTranscoder {
     /// captured footage) while removing the partially written GIF, which
     /// would otherwise read as a successful recording to any
     /// does-the-file-exist check.
-    public static func transcodeRecording(tempMP4: URL, to gifURL: URL, fps: Int, markers: Bool = true) async throws {
+    public static func transcodeRecording(tempMP4: URL, to gifURL: URL, fps: Int, markers: Bool = false) async throws {
         FileHandle.standardError.write(Data("Transcoding to GIF...\n".utf8))
         do {
             let frames = try await transcode(mp4URL: tempMP4, to: gifURL, fps: fps, markers: markers)

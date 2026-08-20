@@ -42,7 +42,7 @@ public struct ResolvedRecordingOptions: Equatable, Sendable {
     /// Whether a GIF is bracketed with START/END marker frames.
     public let gifMarkers: Bool
 
-    public init(format: RecordingFormat?, output: String?, fps: Int?, scale: Double?, gifMarkers: Bool = true) {
+    public init(format: RecordingFormat?, output: String?, fps: Int?, scale: Double?, gifMarkers: Bool = false) {
         let resolvedFormat = format ?? RecordingFormat.infer(fromOutput: output) ?? .mp4
         let sampleFPS = fps ?? 10
         self.format = resolvedFormat
@@ -72,7 +72,7 @@ public struct RecordingOutputPlan {
     public let outputURL: URL
     public let recordTarget: URL
 
-    public init(format: RecordingFormat?, output: String?, fps: Int?, scale: Double?, gifMarkers: Bool = true) throws {
+    public init(format: RecordingFormat?, output: String?, fps: Int?, scale: Double?, gifMarkers: Bool = false) throws {
         options = ResolvedRecordingOptions(format: format, output: output, fps: fps, scale: scale, gifMarkers: gifMarkers)
         RecordingFormat.warnIfOverridingExtension(explicit: format, output: output)
         outputURL = try VideoOutputFile.prepareOutputURL(output: output, fileExtension: options.format.rawValue)

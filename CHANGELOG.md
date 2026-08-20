@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `record-video` GIFs are bracketed with START/END marker cards (~1 s each) so the forever-looping clip has a visible boundary. On by default for `--format gif` on all three surfaces; opt out with `--no-gif-markers`. A failed card render degrades to a marker-less GIF instead of failing the transcode.
+- `record-video --gif-markers` (all three surfaces): bracket a GIF with START/END marker cards (~1 s each) so the forever-looping clip has a visible boundary. Opt-in — the default output remains a faithful capture of the screen. A failed card render degrades to a marker-less GIF instead of failing the transcode.
 
 ## [0.13.0] - 2026-08-06
 
