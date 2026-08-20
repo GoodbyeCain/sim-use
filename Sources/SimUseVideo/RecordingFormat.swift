@@ -39,14 +39,17 @@ public struct ResolvedRecordingOptions: Equatable, Sendable {
     /// The rate GIF sampling runs at — always resolved, so the default
     /// lives here and nowhere else.
     public let gifSampleFPS: Int
+    /// Whether a GIF is bracketed with START/END marker frames.
+    public let gifMarkers: Bool
 
-    public init(format: RecordingFormat?, output: String?, fps: Int?, scale: Double?) {
+    public init(format: RecordingFormat?, output: String?, fps: Int?, scale: Double?, gifMarkers: Bool = true) {
         let resolvedFormat = format ?? RecordingFormat.infer(fromOutput: output) ?? .mp4
         let sampleFPS = fps ?? 10
         self.format = resolvedFormat
         self.gifSampleFPS = sampleFPS
         self.fps = fps ?? (resolvedFormat == .gif ? sampleFPS : nil)
         self.scale = scale ?? (resolvedFormat == .gif ? 0.5 : 1.0)
+        self.gifMarkers = gifMarkers
     }
 
     /// Where the H.264 capture should land: the final URL for mp4, an
@@ -69,8 +72,8 @@ public struct RecordingOutputPlan {
     public let outputURL: URL
     public let recordTarget: URL
 
-    public init(format: RecordingFormat?, output: String?, fps: Int?, scale: Double?) throws {
-        options = ResolvedRecordingOptions(format: format, output: output, fps: fps, scale: scale)
+    public init(format: RecordingFormat?, output: String?, fps: Int?, scale: Double?, gifMarkers: Bool = true) throws {
+        options = ResolvedRecordingOptions(format: format, output: output, fps: fps, scale: scale, gifMarkers: gifMarkers)
         RecordingFormat.warnIfOverridingExtension(explicit: format, output: output)
         outputURL = try VideoOutputFile.prepareOutputURL(output: output, fileExtension: options.format.rawValue)
         recordTarget = options.recordTarget(for: outputURL)
@@ -84,6 +87,11 @@ public struct RecordingOutputPlan {
     /// invalidated, so a stuck transcode stays interruptible.
     public func finalizeRecording() async throws {
         guard options.format == .gif else { return }
-        try await GIFTranscoder.transcodeRecording(tempMP4: recordTarget, to: outputURL, fps: options.gifSampleFPS)
+        try await GIFTranscoder.transcodeRecording(
+            tempMP4: recordTarget,
+            to: outputURL,
+            fps: options.gifSampleFPS,
+            markers: options.gifMarkers
+        )
     }
 }

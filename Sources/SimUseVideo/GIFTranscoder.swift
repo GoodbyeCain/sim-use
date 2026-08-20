@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import Foundation
 import AVFoundation
+import CoreText
 import ImageIO
 import UniformTypeIdentifiers
 import VideoToolbox
@@ -124,11 +125,18 @@ public enum GIFTranscoder {
         return SamplingPlan(timestamps: kept, delays: delays)
     }
 
+    /// How long each START/END marker card holds on screen. Long enough
+    /// to register before the loop restarts, short enough not to pad a
+    /// typical few-second repro clip.
+    static let markerDelay: Double = 1.0
+
     /// Transcode `mp4URL` into an animated GIF at `gifURL`, sampling at
-    /// `fps` (capped at `maximumFPS`). Returns the number of frames
-    /// actually written.
+    /// `fps` (capped at `maximumFPS`). With `markers` (the default), the
+    /// clip is bracketed by START/END card frames so a forever-looping
+    /// GIF has a visible boundary. Returns the number of frames actually
+    /// written, marker cards included.
     @discardableResult
-    public static func transcode(mp4URL: URL, to gifURL: URL, fps: Int) async throws -> Int {
+    public static func transcode(mp4URL: URL, to gifURL: URL, fps: Int, markers: Bool = true) async throws -> Int {
         let asset = AVURLAsset(url: mp4URL)
         guard let track = try await asset.loadTracks(withMediaType: .video).first else {
             throw GIFTranscoderError.noVideoTrack
@@ -142,10 +150,24 @@ public enum GIFTranscoder {
             FileHandle.standardError.write(Data("warning: GIF has \(plan.timestamps.count) frames; the encoder holds all of them in memory until the file is written — for long sessions prefer a lower --fps or --format mp4\n".utf8))
         }
 
+        // Marker cards match the encoded frame size. A failed render
+        // falls back to a marker-less GIF rather than failing the
+        // transcode — the footage matters more than the chrome.
+        var cards: (start: CGImage, end: CGImage)?
+        if markers {
+            let size = try await track.load(.naturalSize)
+            if let start = Self.makeMarkerCard(width: Int(abs(size.width)), height: Int(abs(size.height)), label: "START"),
+               let end = Self.makeMarkerCard(width: Int(abs(size.width)), height: Int(abs(size.height)), label: "END") {
+                cards = (start, end)
+            } else {
+                FileHandle.standardError.write(Data("warning: could not render START/END marker frames; writing the GIF without them\n".utf8))
+            }
+        }
+
         guard let destination = CGImageDestinationCreateWithURL(
             gifURL as CFURL,
             UTType.gif.identifier as CFString,
-            plan.timestamps.count,
+            plan.timestamps.count + (cards == nil ? 0 : 2),
             nil
         ) else {
             throw GIFTranscoderError.cannotCreateDestination(gifURL.path)
@@ -158,15 +180,21 @@ public enum GIFTranscoder {
         ]
         CGImageDestinationSetProperties(destination, gifProperties as CFDictionary)
 
+        if let cards {
+            Self.append(cards.start, delay: Self.markerDelay, to: destination)
+        }
         let appended = try Self.appendSampledFrames(asset: asset, track: track, plan: plan, to: destination)
         guard appended > 0 else {
             throw GIFTranscoderError.noFrames
+        }
+        if let cards {
+            Self.append(cards.end, delay: Self.markerDelay, to: destination)
         }
 
         guard CGImageDestinationFinalize(destination) else {
             throw GIFTranscoderError.finalizeFailed
         }
-        return appended
+        return appended + (cards == nil ? 0 : 2)
     }
 
     /// Convenience wrapper for the record-video post-step: transcodes and
@@ -175,10 +203,10 @@ public enum GIFTranscoder {
     /// captured footage) while removing the partially written GIF, which
     /// would otherwise read as a successful recording to any
     /// does-the-file-exist check.
-    public static func transcodeRecording(tempMP4: URL, to gifURL: URL, fps: Int) async throws {
+    public static func transcodeRecording(tempMP4: URL, to gifURL: URL, fps: Int, markers: Bool = true) async throws {
         FileHandle.standardError.write(Data("Transcoding to GIF...\n".utf8))
         do {
-            let frames = try await transcode(mp4URL: tempMP4, to: gifURL, fps: fps)
+            let frames = try await transcode(mp4URL: tempMP4, to: gifURL, fps: fps, markers: markers)
             try? FileManager.default.removeItem(at: tempMP4)
             FileHandle.standardError.write(Data("GIF written (\(frames) frames)\n".utf8))
         } catch {
@@ -257,13 +285,7 @@ public enum GIFTranscoder {
             VTCreateCGImageFromCVPixelBuffer(pixelBuffer, options: nil, imageOut: &cgImage)
             guard let cgImage else { continue }
 
-            let frameProperties: [CFString: Any] = [
-                kCGImagePropertyGIFDictionary: [
-                    kCGImagePropertyGIFDelayTime: plan.delays[slot],
-                    kCGImagePropertyGIFUnclampedDelayTime: plan.delays[slot]
-                ]
-            ]
-            CGImageDestinationAddImage(destination, cgImage, frameProperties as CFDictionary)
+            Self.append(cgImage, delay: plan.delays[slot], to: destination)
             appended += 1
         }
         if reader.status == .failed {
@@ -271,5 +293,53 @@ public enum GIFTranscoder {
         }
         reader.cancelReading()
         return appended
+    }
+
+    private static func append(_ image: CGImage, delay: Double, to destination: CGImageDestination) {
+        let frameProperties: [CFString: Any] = [
+            kCGImagePropertyGIFDictionary: [
+                kCGImagePropertyGIFDelayTime: delay,
+                kCGImagePropertyGIFUnclampedDelayTime: delay
+            ]
+        ]
+        CGImageDestinationAddImage(destination, image, frameProperties as CFDictionary)
+    }
+
+    /// A solid card with a centered white label, matching the encoded
+    /// frame size, used to bracket the clip. Internal for tests.
+    static func makeMarkerCard(width: Int, height: Int, label: String) -> CGImage? {
+        guard width > 0, height > 0,
+              let context = CGContext(
+                  data: nil,
+                  width: width,
+                  height: height,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: CGColorSpaceCreateDeviceRGB(),
+                  bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+              )
+        else { return nil }
+
+        context.setFillColor(CGColor(red: 0.08, green: 0.09, blue: 0.11, alpha: 1.0))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
+        // Size the label to the card so it reads at any recording scale.
+        let fontSize = CGFloat(min(width, height)) / 5.0
+        let font = CTFontCreateWithName("HelveticaNeue-Bold" as CFString, fontSize, nil)
+        let attributes: [CFString: Any] = [
+            kCTFontAttributeName: font,
+            kCTForegroundColorAttributeName: CGColor(red: 1, green: 1, blue: 1, alpha: 1)
+        ]
+        guard let attributed = CFAttributedStringCreate(nil, label as CFString, attributes as CFDictionary) else {
+            return nil
+        }
+        let line = CTLineCreateWithAttributedString(attributed)
+        let bounds = CTLineGetBoundsWithOptions(line, .useOpticalBounds)
+        context.textPosition = CGPoint(
+            x: (CGFloat(width) - bounds.width) / 2 - bounds.minX,
+            y: (CGFloat(height) - bounds.height) / 2 - bounds.minY
+        )
+        CTLineDraw(line, context)
+        return context.makeImage()
     }
 }

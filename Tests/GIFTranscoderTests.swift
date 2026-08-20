@@ -111,6 +111,7 @@ struct GIFTranscoderTests {
         #expect(gif.fps == 10)
         #expect(gif.gifSampleFPS == 10)
         #expect(gif.scale == 0.5)
+        #expect(gif.gifMarkers) // default on
 
         let inferred = Options(format: nil, output: "demo.gif", fps: nil, scale: nil)
         #expect(inferred.format == .gif)
@@ -201,7 +202,7 @@ struct GIFTranscoderTests {
             .appendingPathComponent("gif-transcoder-test-\(UUID().uuidString).gif")
         defer { try? FileManager.default.removeItem(at: gifURL) }
 
-        let written = try await GIFTranscoder.transcode(mp4URL: mp4URL, to: gifURL, fps: 10)
+        let written = try await GIFTranscoder.transcode(mp4URL: mp4URL, to: gifURL, fps: 10, markers: false)
 
         let source = try #require(CGImageSourceCreateWithURL(gifURL as CFURL, nil))
         let type = try #require(CGImageSourceGetType(source) as String?)
@@ -233,9 +234,62 @@ struct GIFTranscoderTests {
             .appendingPathComponent("gif-transcoder-test-\(UUID().uuidString).gif")
         defer { try? FileManager.default.removeItem(at: gifURL) }
 
-        let written = try await GIFTranscoder.transcode(mp4URL: mp4URL, to: gifURL, fps: 10)
+        let written = try await GIFTranscoder.transcode(mp4URL: mp4URL, to: gifURL, fps: 10, markers: false)
         #expect(written >= 8 && written <= 12)
         #expect(CGImageSourceGetCount(try #require(CGImageSourceCreateWithURL(gifURL as CFURL, nil))) == written)
+    }
+
+    @Test("Markers bracket the GIF with START/END cards by default")
+    func transcodeAddsMarkerCards() async throws {
+        let mp4URL = try await makeSyntheticMP4(frameCount: 10, fps: 10)
+        defer { try? FileManager.default.removeItem(at: mp4URL) }
+        let gifURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gif-transcoder-test-\(UUID().uuidString).gif")
+        defer { try? FileManager.default.removeItem(at: gifURL) }
+
+        let written = try await GIFTranscoder.transcode(mp4URL: mp4URL, to: gifURL, fps: 10)
+
+        let source = try #require(CGImageSourceCreateWithURL(gifURL as CFURL, nil))
+        let frameCount = CGImageSourceGetCount(source)
+        #expect(frameCount == written)
+        // 10 sampled content frames (±2 encoder variance) + 2 marker cards.
+        #expect(frameCount >= 10 && frameCount <= 12)
+
+        // Marker cards hold for the marker delay; content frames pace at 0.1 s.
+        for index in [0, frameCount - 1] {
+            let props = try #require(CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any])
+            let gif = try #require(props[kCGImagePropertyGIFDictionary] as? [CFString: Any])
+            let delay = try #require(gif[kCGImagePropertyGIFUnclampedDelayTime] as? Double)
+            #expect(abs(delay - GIFTranscoder.markerDelay) < 0.02)
+        }
+
+        // The cards match the content frame size.
+        let first = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        #expect(first.width == 64 && first.height == 64)
+    }
+
+    @Test("Marker card renders a light label on a dark background")
+    func markerCardRendering() throws {
+        let card = try #require(GIFTranscoder.makeMarkerCard(width: 120, height: 60, label: "START"))
+        #expect(card.width == 120 && card.height == 60)
+
+        var pixels = [UInt8](repeating: 0, count: 120 * 60 * 4)
+        let context = try #require(CGContext(
+            data: &pixels,
+            width: 120,
+            height: 60,
+            bitsPerComponent: 8,
+            bytesPerRow: 120 * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(card, in: CGRect(x: 0, y: 0, width: 120, height: 60))
+
+        // Corner pixel is background (dark); the card must also contain
+        // bright text pixels somewhere.
+        #expect(pixels[0] < 60 && pixels[1] < 60 && pixels[2] < 60)
+        let hasBrightPixel = stride(from: 0, to: pixels.count, by: 4).contains { pixels[$0] > 200 }
+        #expect(hasBrightPixel)
     }
 
     @Test("A file with no video track throws noVideoTrack")
