@@ -50,6 +50,9 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
     @Option(help: "Output format: mp4, gif. Defaults to the --output extension when recognized, else mp4.")
     public var format: RecordingFormat?
 
+    @Flag(help: "Bracket a GIF with START/END marker frames (opt-in; ignored for mp4).")
+    public var gifMarkers: Bool = false
+
     @Option(help: "Output file path. Defaults to sim-use-video-<timestamp>.<format> in the current directory.")
     public var output: String?
 
@@ -100,7 +103,7 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
 
         // GIF is transcoded from a finished MP4 (see GIFTranscoder); the
         // capture loop itself always writes H.264, to plan.recordTarget.
-        let plan = try RecordingOutputPlan(format: format, output: output, fps: fps, scale: scale)
+        let plan = try RecordingOutputPlan(format: format, output: output, fps: fps, scale: scale, gifMarkers: gifMarkers)
         let options = plan.options
         let recordTarget = plan.recordTarget
         FileHandle.standardError.write(Data("Recording simulator \(targetSimulator.udid) to \(plan.outputURL.path)\n".utf8))

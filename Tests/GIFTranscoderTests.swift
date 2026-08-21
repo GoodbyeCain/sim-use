@@ -7,7 +7,14 @@ import ImageIO
 import UniformTypeIdentifiers
 @testable import SimUseVideo
 
-@Suite("GIFTranscoder")
+// .serialized: the round-trip tests each drive a real VideoToolbox
+// H.264 encode session (makeSyntheticMP4). Two such sessions ran
+// concurrently for weeks of green CI; the third one added with the
+// marker feature deadlocked the encoder on GitHub's virtualized
+// macOS runners in 4 of 4 runs (#100/#101), wedging the entire
+// swift-test process until the job timeout. One session at a time
+// costs well under a second locally.
+@Suite("GIFTranscoder", .serialized)
 struct GIFTranscoderTests {
     // MARK: - Sampling plan (pure logic)
 
@@ -101,21 +108,21 @@ struct GIFTranscoderTests {
     func resolvedOptionsDefaults() {
         typealias Options = ResolvedRecordingOptions
 
-        let mp4 = Options(format: nil, output: nil, fps: nil, scale: nil)
+        let mp4 = Options(format: nil, output: nil, fps: nil, scale: nil, gifMarkers: false)
         #expect(mp4.format == .mp4)
         #expect(mp4.fps == nil) // capture-path default (30 native / 10 fallback)
         #expect(mp4.scale == 1.0)
 
-        let gif = Options(format: .gif, output: nil, fps: nil, scale: nil)
+        let gif = Options(format: .gif, output: nil, fps: nil, scale: nil, gifMarkers: false)
         #expect(gif.format == .gif)
         #expect(gif.fps == 10)
         #expect(gif.gifSampleFPS == 10)
         #expect(gif.scale == 0.5)
 
-        let inferred = Options(format: nil, output: "demo.gif", fps: nil, scale: nil)
+        let inferred = Options(format: nil, output: "demo.gif", fps: nil, scale: nil, gifMarkers: false)
         #expect(inferred.format == .gif)
 
-        let explicit = Options(format: .mp4, output: "demo.gif", fps: 24, scale: 0.8)
+        let explicit = Options(format: .mp4, output: "demo.gif", fps: 24, scale: 0.8, gifMarkers: false)
         #expect(explicit.format == .mp4) // explicit --format beats the extension
         #expect(explicit.fps == 24)
         #expect(explicit.gifSampleFPS == 24)
@@ -133,7 +140,7 @@ struct GIFTranscoderTests {
         let stale = URL(fileURLWithPath: base.path + ".recording.mp4")
         try Data([0x00]).write(to: stale)
 
-        let plan = try RecordingOutputPlan(format: nil, output: base.path, fps: nil, scale: nil)
+        let plan = try RecordingOutputPlan(format: nil, output: base.path, fps: nil, scale: nil, gifMarkers: false)
         #expect(plan.options.format == .gif)
         #expect(plan.recordTarget == stale)
         #expect(!FileManager.default.fileExists(atPath: stale.path))
@@ -144,7 +151,7 @@ struct GIFTranscoderTests {
         let base = FileManager.default.temporaryDirectory
             .appendingPathComponent("gif-plan-test-\(UUID().uuidString).mp4")
         defer { try? FileManager.default.removeItem(at: base) }
-        let plan = try RecordingOutputPlan(format: nil, output: base.path, fps: nil, scale: nil)
+        let plan = try RecordingOutputPlan(format: nil, output: base.path, fps: nil, scale: nil, gifMarkers: false)
         #expect(plan.recordTarget == plan.outputURL)
     }
 
@@ -201,7 +208,7 @@ struct GIFTranscoderTests {
             .appendingPathComponent("gif-transcoder-test-\(UUID().uuidString).gif")
         defer { try? FileManager.default.removeItem(at: gifURL) }
 
-        let written = try await GIFTranscoder.transcode(mp4URL: mp4URL, to: gifURL, fps: 10)
+        let written = try await GIFTranscoder.transcode(mp4URL: mp4URL, to: gifURL, fps: 10, markers: false)
 
         let source = try #require(CGImageSourceCreateWithURL(gifURL as CFURL, nil))
         let type = try #require(CGImageSourceGetType(source) as String?)
@@ -233,9 +240,62 @@ struct GIFTranscoderTests {
             .appendingPathComponent("gif-transcoder-test-\(UUID().uuidString).gif")
         defer { try? FileManager.default.removeItem(at: gifURL) }
 
-        let written = try await GIFTranscoder.transcode(mp4URL: mp4URL, to: gifURL, fps: 10)
+        let written = try await GIFTranscoder.transcode(mp4URL: mp4URL, to: gifURL, fps: 10, markers: false)
         #expect(written >= 8 && written <= 12)
         #expect(CGImageSourceGetCount(try #require(CGImageSourceCreateWithURL(gifURL as CFURL, nil))) == written)
+    }
+
+    @Test("Opt-in markers bracket the GIF with START/END cards")
+    func transcodeAddsMarkerCards() async throws {
+        let mp4URL = try await makeSyntheticMP4(frameCount: 10, fps: 10)
+        defer { try? FileManager.default.removeItem(at: mp4URL) }
+        let gifURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gif-transcoder-test-\(UUID().uuidString).gif")
+        defer { try? FileManager.default.removeItem(at: gifURL) }
+
+        let written = try await GIFTranscoder.transcode(mp4URL: mp4URL, to: gifURL, fps: 10, markers: true)
+
+        let source = try #require(CGImageSourceCreateWithURL(gifURL as CFURL, nil))
+        let frameCount = CGImageSourceGetCount(source)
+        #expect(frameCount == written)
+        // 10 sampled content frames (±2 encoder variance) + 2 marker cards.
+        #expect(frameCount >= 10 && frameCount <= 12)
+
+        // Marker cards hold for the marker delay; content frames pace at 0.1 s.
+        for index in [0, frameCount - 1] {
+            let props = try #require(CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any])
+            let gif = try #require(props[kCGImagePropertyGIFDictionary] as? [CFString: Any])
+            let delay = try #require(gif[kCGImagePropertyGIFUnclampedDelayTime] as? Double)
+            #expect(abs(delay - GIFTranscoder.markerDelay) < 0.02)
+        }
+
+        // The cards match the content frame size.
+        let first = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        #expect(first.width == 64 && first.height == 64)
+    }
+
+    @Test("Marker card renders a light label on a dark background")
+    func markerCardRendering() throws {
+        let card = try #require(GIFTranscoder.makeMarkerCard(width: 120, height: 60, label: "START"))
+        #expect(card.width == 120 && card.height == 60)
+
+        var pixels = [UInt8](repeating: 0, count: 120 * 60 * 4)
+        let context = try #require(CGContext(
+            data: &pixels,
+            width: 120,
+            height: 60,
+            bitsPerComponent: 8,
+            bytesPerRow: 120 * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(card, in: CGRect(x: 0, y: 0, width: 120, height: 60))
+
+        // Corner pixel is background (dark); the card must also contain
+        // bright text pixels somewhere.
+        #expect(pixels[0] < 60 && pixels[1] < 60 && pixels[2] < 60)
+        let hasBrightPixel = stride(from: 0, to: pixels.count, by: 4).contains { pixels[$0] > 200 }
+        #expect(hasBrightPixel)
     }
 
     @Test("A file with no video track throws noVideoTrack")
@@ -248,7 +308,7 @@ struct GIFTranscoderTests {
             .appendingPathComponent("gif-transcoder-test-\(UUID().uuidString).gif")
 
         await #expect(throws: (any Error).self) {
-            try await GIFTranscoder.transcode(mp4URL: bogusURL, to: gifURL, fps: 10)
+            try await GIFTranscoder.transcode(mp4URL: bogusURL, to: gifURL, fps: 10, markers: false)
         }
     }
 
@@ -263,7 +323,7 @@ struct GIFTranscoderTests {
         try Data([0x47, 0x49, 0x46]).write(to: gifURL) // partial/garbage GIF on disk
 
         await #expect(throws: (any Error).self) {
-            try await GIFTranscoder.transcodeRecording(tempMP4: bogusURL, to: gifURL, fps: 10)
+            try await GIFTranscoder.transcodeRecording(tempMP4: bogusURL, to: gifURL, fps: 10, markers: false)
         }
         #expect(FileManager.default.fileExists(atPath: bogusURL.path)) // footage preserved
         #expect(!FileManager.default.fileExists(atPath: gifURL.path)) // garbage removed

@@ -44,6 +44,9 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
     @Option(help: "Output format: mp4, gif. Defaults to the --output extension when recognized, else mp4.")
     public var format: RecordingFormat?
 
+    @Flag(help: "Bracket a GIF with START/END marker frames (opt-in; ignored for mp4).")
+    public var gifMarkers: Bool = false
+
     @Option(help: "Output file path. Defaults to sim-use-video-<timestamp>.<format> in the current directory.")
     public var output: String?
 
@@ -81,7 +84,8 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
             format: format,
             fps: fps,
             quality: quality,
-            scale: scale
+            scale: scale,
+            gifMarkers: gifMarkers
         )
         return ExecutionResult(path: outputURL.path)
     }
@@ -108,14 +112,15 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
         format: RecordingFormat?,
         fps: Int?,
         quality: Int,
-        scale: Double?
+        scale: Double?,
+        gifMarkers: Bool
     ) async throws -> URL {
         let adb = Adb()
         try assertAdbDeviceOnline(adb: adb, serial: serial)
 
         // GIF is transcoded from a finished MP4 (see GIFTranscoder); the
         // capture loop itself always writes H.264, to plan.recordTarget.
-        let plan = try RecordingOutputPlan(format: format, output: output, fps: fps, scale: scale)
+        let plan = try RecordingOutputPlan(format: format, output: output, fps: fps, scale: scale, gifMarkers: gifMarkers)
         let options = plan.options
         let recordTarget = plan.recordTarget
         // Native screenrecord capture is variable-frame-rate either way;

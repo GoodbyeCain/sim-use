@@ -338,7 +338,9 @@ to wall-clock. If the transcode fails, the intermediate MP4 is preserved
 and its path reported, so the footage is never lost. GIF is meant for
 short clips: the encoder holds every frame in memory until the file is
 written, so for sessions beyond a few hundred frames prefer a lower
-`--fps` or `--format mp4`.
+`--fps` or `--format mp4`. Because the GIF loops forever, `--gif-markers`
+can bracket the clip with START/END marker cards (~1 s each) so the
+boundary is visible.
 
 ### Accessibility inspection
 
