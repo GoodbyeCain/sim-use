@@ -7,7 +7,14 @@ import ImageIO
 import UniformTypeIdentifiers
 @testable import SimUseVideo
 
-@Suite("GIFTranscoder")
+// .serialized: the round-trip tests each drive a real VideoToolbox
+// H.264 encode session (makeSyntheticMP4). Two such sessions ran
+// concurrently for weeks of green CI; the third one added with the
+// marker feature deadlocked the encoder on GitHub's virtualized
+// macOS runners in 4 of 4 runs (#100/#101), wedging the entire
+// swift-test process until the job timeout. One session at a time
+// costs well under a second locally.
+@Suite("GIFTranscoder", .serialized)
 struct GIFTranscoderTests {
     // MARK: - Sampling plan (pure logic)
 
