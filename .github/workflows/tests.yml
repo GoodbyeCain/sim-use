@@ -139,10 +139,13 @@ jobs:
       # depends on, including the sim-use executable the smoke step
       # runs. make picks xcsift up from PATH and condenses the output
       # to a TOON summary itself; SIM_USE_RAW_LOG additionally saves
-      # the raw swift output, kept as a failure-only artifact for
-      # forensics the condensed view can't serve (e.g. grepping daemon
-      # log lines).
+      # the raw swift output, kept as an artifact on failure or
+      # cancellation for forensics the condensed view can't serve
+      # (e.g. grepping daemon log lines, or finding the last test that
+      # started before a hang). The step timeout bounds a wedged test
+      # run well below the job timeout so the artifact still uploads.
       - name: Run unit tests
+        timeout-minutes: 20
         run: make test
         env:
           SIM_USE_RAW_LOG: ${{ runner.temp }}/test.log
@@ -165,8 +168,11 @@ jobs:
             } >> "${GITHUB_STEP_SUMMARY}"
           fi
 
+      # failure() is false when a step or job times out (that's a
+      # cancellation), and a hang is exactly when the partial raw log
+      # matters most — cover both.
       - name: Upload raw logs on failure
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v7
         with:
           name: raw-swift-logs
