@@ -39,10 +39,13 @@ public struct ResolvedRecordingOptions: Equatable, Sendable {
     /// The rate GIF sampling runs at — always resolved, so the default
     /// lives here and nowhere else.
     public let gifSampleFPS: Int
-    /// Whether a GIF is bracketed with START/END marker frames.
+    /// Whether a GIF is bracketed with START/END marker frames. No
+    /// default here or downstream — the opt-in policy lives on the
+    /// `--gif-markers` flag of the three command surfaces, and every
+    /// internal caller passes it explicitly.
     public let gifMarkers: Bool
 
-    public init(format: RecordingFormat?, output: String?, fps: Int?, scale: Double?, gifMarkers: Bool = false) {
+    public init(format: RecordingFormat?, output: String?, fps: Int?, scale: Double?, gifMarkers: Bool) {
         let resolvedFormat = format ?? RecordingFormat.infer(fromOutput: output) ?? .mp4
         let sampleFPS = fps ?? 10
         self.format = resolvedFormat
@@ -72,7 +75,7 @@ public struct RecordingOutputPlan {
     public let outputURL: URL
     public let recordTarget: URL
 
-    public init(format: RecordingFormat?, output: String?, fps: Int?, scale: Double?, gifMarkers: Bool = false) throws {
+    public init(format: RecordingFormat?, output: String?, fps: Int?, scale: Double?, gifMarkers: Bool) throws {
         options = ResolvedRecordingOptions(format: format, output: output, fps: fps, scale: scale, gifMarkers: gifMarkers)
         RecordingFormat.warnIfOverridingExtension(explicit: format, output: output)
         outputURL = try VideoOutputFile.prepareOutputURL(output: output, fileExtension: options.format.rawValue)

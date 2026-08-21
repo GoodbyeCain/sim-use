@@ -113,7 +113,7 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
         fps: Int?,
         quality: Int,
         scale: Double?,
-        gifMarkers: Bool = false
+        gifMarkers: Bool
     ) async throws -> URL {
         let adb = Adb()
         try assertAdbDeviceOnline(adb: adb, serial: serial)
