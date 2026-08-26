@@ -419,6 +419,10 @@ sim-use ios-device tap --label "Friends" --element-type Button \
 
 # Dynamic labels can use the regular substring selector vocabulary.
 sim-use ios-device tap --label-contains "Reply" --element-type Button
+
+# Or target the stable accessibility identifier shown as #id — the same
+# `#id` positional the simulator tap accepts (--id works too).
+sim-use ios-device tap '#BackButton'
 ```
 
 A device is addressed by UDID or ECID, and `--device` is optional only when exactly one is attached. Run `ui` again after every action: accessibility actions are fire-and-forget, so the follow-up read is the authoritative verification.
@@ -428,7 +432,7 @@ Passing a physical device UDID to a top-level or `sim-use ios` verb fails fast w
 This channel deliberately differs from the simulator backend:
 
   * **No element geometry.** There is no coordinate tap, `swipe`, `gesture` or `multi-touch`. Only the exposed `tap` accessibility action is currently supported; unsupported simulator verbs are not routed here.
-  * **No `@N` aliases, but stable `#identifier`s.** Element handles encode a live pointer and expire with their DTX connection, so the outline advertises no `@N`; `tap` re-resolves `--label` or `--label-contains` in the same session that sends Activate. It does surface each element's accessibility identifier as `#id` for reference — useful when a label is dynamic, such as a navigation-bar back button, which is labelled with the previous screen's title but keeps `#BackButton`. The back button is an ordinary row in the outline; tap it by the label shown in the same read.
+  * **No `@N` aliases, but stable `#id`s.** Element handles encode a live pointer and expire with their DTX connection, so — like the missing geometry — the cross-invocation `@N` alias cannot be backed faithfully and the outline advertises none. The stable accessibility identifier *can*: the outline shows each element's `#id`, and `tap` accepts it as a positional `#<id>` or `--id` (mirroring the simulator), alongside `--label` / `--label-contains` / `--element-type`. Prefer the `#id` when a label is dynamic — a navigation-bar back button is labelled with the previous screen's title but keeps `#BackButton`, and is an ordinary, tappable row in the outline.
   * **Text output only.** The experimental `ios-device` commands do not yet support `--json`, screenshot or recording.
   * **Slower snapshots.** A full tree costs a few seconds. `ui --fast` stops at labelled elements and is roughly 40% quicker, at the cost of about a quarter of the elements.
   * **Reading order, not screen order.** With no frames to sort by, the outline follows accessibility nesting and reading order.

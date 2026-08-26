@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `sim-use ios-device` (experimental): drive a development-signed app on a physical iPhone or iPad. `devices` lists attached devices, `ui` prints the foreground app's accessibility tree, and `tap --label` / `--label-contains` sends Activate to one unambiguous match. sim-use installs and signs no runner and needs no Developer Disk Image; the device must be unlocked and the target app must have `get-task-allow=true`. This channel intentionally omits coordinate tap, swipe and gesture because the daemon exposes no element geometry.
-- `sim-use ios-device ui` now renders each element's accessibility identifier as `#id`, a stable handle to prefer when a label is dynamic (a navigation-bar back button is labelled with the previous screen's title but keeps `#BackButton`).
+- `sim-use ios-device ui` now renders each element's accessibility identifier as `#id`, and `sim-use ios-device tap` accepts it as a positional `#<id>` or `--id` (mirroring the simulator tap). This is a stable handle to prefer when a label is dynamic — a navigation-bar back button is labelled with the previous screen's title but keeps `#BackButton`. The `@N` alias and coordinate forms remain unavailable on this channel (handles expire between processes; the daemon exposes no geometry).
 
 ### Fixed
 

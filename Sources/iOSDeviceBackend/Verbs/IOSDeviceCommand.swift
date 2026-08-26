@@ -25,26 +25,30 @@ enum IOSDeviceCommandError: Error, LocalizedError, CustomStringConvertible {
 struct DeviceTapTargetResolver {
     static func resolve(
         _ elements: [DeviceElement],
-        label: String?,
-        labelContains: String?,
-        elementType: String?
+        identifier: String? = nil,
+        label: String? = nil,
+        labelContains: String? = nil,
+        elementType: String? = nil
     ) throws -> DeviceElement {
         let selectorDescription: String
-        let matchesLabel: (String) -> Bool
+        let matchesElement: (DeviceElement) -> Bool
 
-        if let label {
+        if let identifier {
+            selectorDescription = "#\(identifier)"
+            matchesElement = { $0.identifier?.localizedCaseInsensitiveCompare(identifier) == .orderedSame }
+        } else if let label {
             selectorDescription = "--label '\(label)'"
-            matchesLabel = { $0.localizedCaseInsensitiveCompare(label) == .orderedSame }
+            matchesElement = { DeviceOutline.label(from: $0.summary, role: $0.role).localizedCaseInsensitiveCompare(label) == .orderedSame }
         } else if let labelContains {
             selectorDescription = "--label-contains '\(labelContains)'"
-            matchesLabel = { $0.localizedCaseInsensitiveContains(labelContains) }
+            matchesElement = { DeviceOutline.label(from: $0.summary, role: $0.role).localizedCaseInsensitiveContains(labelContains) }
         } else {
             throw IOSDeviceCommandError.missingSelector
         }
 
         let accessible = elements.filter(\.isAccessibilityElement)
         let matches = accessible.filter { element in
-            matchesLabel(DeviceOutline.label(from: element.summary, role: element.role))
+            matchesElement(element)
                 && elementType.map {
                     element.role.localizedCaseInsensitiveCompare($0) == .orderedSame
                 } != false
@@ -60,7 +64,8 @@ struct DeviceTapTargetResolver {
 
         // Hierarchies commonly contain a button and a nested static-text node
         // with the same label. Match the actionable button just as the regular
-        // simulator resolver prefers actionable elements.
+        // simulator resolver prefers actionable elements. (An identifier is
+        // expected to be unique, so this only really fires for label matches.)
         let buttons = matches.filter { $0.role.localizedCaseInsensitiveContains("button") }
         if buttons.count == 1 { return buttons[0] }
 
@@ -70,8 +75,9 @@ struct DeviceTapTargetResolver {
         )
     }
 
-    private static func describe(_ element: DeviceElement) -> String {
-        "'\(DeviceOutline.label(from: element.summary, role: element.role))' [\(element.role)]"
+    static func describe(_ element: DeviceElement) -> String {
+        let id = element.identifier.map { " #\($0)" } ?? ""
+        return "'\(DeviceOutline.label(from: element.summary, role: element.role))' [\(element.role)]\(id)"
     }
 }
 
@@ -158,17 +164,31 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
     struct Tap: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "tap",
-            abstract: "Activate an element by accessibility label.",
+            abstract: "Activate an element by accessibility identifier or label.",
             discussion: """
-            Uses the same --label, --label-contains and --element-type
-            vocabulary as the regular tap command. The element is resolved and
-            activated inside one connection because physical-device element
-            handles cannot be reused by a later process. The action is
-            fire-and-forget; run 'sim-use ios-device ui' again to verify.
+            Targeting forms, mirroring the simulator tap where the channel
+            allows (there is no `@N` alias — physical-device element handles
+            expire between processes — and no coordinate fallback, because the
+            daemon exposes no geometry):
+              * Positional `#<id>` or `--id <id>` — the accessibility
+                identifier shown in `ios-device ui`. Stable across reads, so
+                prefer it when a label is dynamic (a back button is labelled
+                with the previous screen's title but keeps `#BackButton`).
+              * `--label` / `--label-contains` — exact or substring label.
+              * `--element-type` disambiguates when several elements match.
+            The element is resolved and activated inside one connection because
+            the handle cannot be reused later. Fire-and-forget; run
+            'ios-device ui' again to verify.
             """
         )
 
         @OptionGroup var device: DeviceOptions
+
+        @Argument(help: "Positional accessibility identifier, written `#<id>` as shown in ios-device ui.")
+        var alias: String?
+
+        @Option(help: "Accessibility identifier from ios-device ui (the `#id`).")
+        var id: String?
 
         @Option(help: "Exact rendered label from ios-device ui.")
         var label: String?
@@ -176,16 +196,29 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
         @Option(help: "Case-insensitive substring of an element label.")
         var labelContains: String?
 
-        @Option(help: "Accessibility role used to disambiguate matching labels, for example Button.")
+        @Option(help: "Accessibility role used to disambiguate matches, for example Button.")
         var elementType: String?
 
+        /// Identifier from the positional `#id` alias or the `--id` option.
+        private var resolvedIdentifier: String? {
+            if let id { return id }
+            guard let alias else { return nil }
+            return alias.hasPrefix("#") ? String(alias.dropFirst()) : alias
+        }
+
         func validate() throws {
-            let selectors = [label, labelContains].compactMap { $0 }
+            if let alias, id != nil {
+                throw ValidationError("specify the identifier once — either the positional `#id` or --id, not both")
+            }
+            if let alias, !alias.hasPrefix("#") {
+                throw ValidationError("positional target must be an identifier written `#\(alias)`; there is no `@N` alias on physical devices — use `#<id>`, --label, or --label-contains")
+            }
+            let selectors = [resolvedIdentifier, label, labelContains].compactMap { $0 }
             guard selectors.count == 1 else {
-                throw ValidationError("specify exactly one of --label or --label-contains")
+                throw ValidationError("specify exactly one of `#id` / --id, --label, or --label-contains")
             }
             guard selectors[0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
-                throw ValidationError("accessibility labels cannot be empty")
+                throw ValidationError("the selector cannot be empty")
             }
             if let elementType, elementType.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 throw ValidationError("--element-type cannot be empty")
@@ -193,16 +226,18 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
         }
 
         func run() async throws {
+            let identifier = resolvedIdentifier
             let matched = try await DeviceSession.withClient(udid: device.udid) { client in
                 let elements = try await DeviceTreeFetcher(client: client).fetchTree()
                 let target = try DeviceTapTargetResolver.resolve(
                     elements,
+                    identifier: identifier,
                     label: label,
                     labelContains: labelContains,
                     elementType: elementType
                 )
                 try await client.perform(.activate, on: target.element)
-                return target.summary
+                return DeviceTapTargetResolver.describe(target)
             }
             print("Sent Activate to \(matched)")
         }

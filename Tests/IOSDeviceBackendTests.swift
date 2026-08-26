@@ -86,6 +86,38 @@ struct IOSDeviceBackendTests {
         #expect(resolved.element == button.element)
     }
 
+    @Test("identifier selector matches the stable id, not the dynamic label")
+    func identifierSelectorMatches() throws {
+        let back = element(1, summary: "sim-use Playground Button", role: "Button", identifier: "BackButton")
+        let other = element(2, summary: "Settings Button", role: "Button", identifier: "settingsButton")
+
+        let resolved = try DeviceTapTargetResolver.resolve(
+            [back, other],
+            identifier: "BackButton"
+        )
+
+        #expect(resolved.element == back.element)
+    }
+
+    @Test("a missing identifier fails loudly")
+    func missingIdentifierFails() {
+        let button = element(1, summary: "Settings Button", role: "Button", identifier: "settingsButton")
+        #expect(throws: IOSDeviceCommandError.self) {
+            _ = try DeviceTapTargetResolver.resolve([button], identifier: "BackButton")
+        }
+    }
+
+    @Test("physical-device tap accepts #id but rejects an @N alias")
+    func tapAcceptsIdentifierRejectsAlias() async throws {
+        let atAlias = try await TestHelpers.runSimUseCommandAllowFailure("ios-device tap @1 --device not-a-device")
+        #expect(atAlias.exitCode != 0)
+        #expect(atAlias.output.contains("@N"))
+
+        let help = try await TestHelpers.runSimUseCommand("ios-device tap --help")
+        #expect(help.output.contains("--id <id>"))
+        #expect(help.output.contains("#<id>"))
+    }
+
     @Test("element type narrows a contains selector")
     func elementTypeNarrowsContainsSelector() throws {
         let button = element(1, summary: "Friends Button", role: "Button")

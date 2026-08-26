@@ -102,12 +102,15 @@ sim-use ios-device ui --device <UDID>
 
 # For dynamic labels
 sim-use ios-device tap --label-contains "Reply" --element-type Button --device <UDID>
+
+# By stable identifier (the #id shown in ui) — positional or --id, like the simulator
+sim-use ios-device tap '#BackButton' --device <UDID>
 ```
 
 Rules for this experimental surface:
 
 1. **Treat hierarchy errors as capability failures.** If the command says the hierarchy is unavailable, confirm the screen is unlocked and inspect the installed app's final `get-task-allow` entitlement. Do not fall back to coordinates or focus walking.
-2. **Tap by standard label selectors, not aliases.** Element handles expire with the DTX connection, so the outline deliberately has no `@N`. Use `--label` for exact text, `--label-contains` for dynamic text, and `--element-type` to disambiguate. The outline also shows each element's `#identifier` as a stable reference. The navigation-bar back button appears as a normal `Button "<previous screen title>" #BackButton`; go back by tapping it via the label shown in that same `ui` read — no special "back" verb.
+2. **Tap by `#id` or label, not `@N`.** Element handles expire with the DTX connection, so there is no `@N` alias (nor coordinates — no geometry). Use the `#id` shown in the outline (positional `#<id>` or `--id`) — it is stable and the best choice when a label is dynamic — or `--label` / `--label-contains`, with `--element-type` to disambiguate. The navigation-bar back button appears as a normal `Button "<previous screen title>" #BackButton`; go back by tapping `#BackButton` (or the shown label) like any other element — no special "back" verb.
 3. **Always verify.** Activate is fire-and-forget. Re-run `sim-use ios-device ui` and confirm the expected state before continuing.
 4. **No geometry or simulator-only verbs.** Coordinate tap, swipe, gesture, multi-touch, type, screenshot, recording and `--json` are unavailable here. Do not substitute a similarly named top-level command.
 5. **Budget seconds, not milliseconds.** A full tree takes a few seconds. `ui --fast` is quicker but omits nested elements; do not poll in a tight loop.
