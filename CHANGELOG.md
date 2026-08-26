@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `sim-use ios-device` discovery bails in ~1 s when no iPhone is attached, instead of waiting the full 5 s timeout. An empty attachment set never satisfies the quiescence rule (it needs a non-empty, unchanged set), so the discovery loop used to run to the deadline on every device-less host; it now gives up after a short grace once nothing has appeared. A device that is present still settles in ~0.4 s, and a multi-device attach burst still coalesces (the grace only applies until the first device is seen).
 - Top-level and `sim-use ios` verbs now reject a physical iOS device UDID at resolution time with a pointer to `sim-use ios-device`, instead of misclassifying it as an Android serial and diagnosing a plugged-in iPhone as "not reachable via adb".
 - Wait for physical-device attachment notifications to settle so multiple USB-connected iOS devices are all discovered.
 - Reject empty physical-device hierarchies, missing or ambiguous tap targets, and invalid hierarchy concurrency instead of reporting success or silently choosing an element.

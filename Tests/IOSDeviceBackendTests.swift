@@ -71,6 +71,38 @@ struct IOSDeviceBackendTests {
         #expect(settled)
     }
 
+    @Test("discovery bails once the empty-grace window elapses with no device")
+    func discoveryBailsWhenEmpty() {
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        var discovery = AttachmentDiscovery<String>(quietInterval: 0.25, emptyGrace: 1.0)
+
+        #expect(discovery.step([], at: t0) == .keepWaiting)
+        #expect(discovery.step([], at: t0.addingTimeInterval(0.9)) == .keepWaiting)
+        #expect(discovery.step([], at: t0.addingTimeInterval(1.0)) == .bailEmpty)
+    }
+
+    @Test("a device seen before the grace prevents the empty bail and settles")
+    func discoverySettlesWhenDeviceAppears() {
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        var discovery = AttachmentDiscovery<String>(quietInterval: 0.25, emptyGrace: 1.0)
+
+        #expect(discovery.step([], at: t0) == .keepWaiting)
+        #expect(discovery.step(["a"], at: t0.addingTimeInterval(0.1)) == .keepWaiting)
+        #expect(discovery.step(["a"], at: t0.addingTimeInterval(0.35)) == .settled)
+    }
+
+    @Test("a device appearing at the grace boundary latches sawAny and never bails")
+    func discoveryLateDeviceStillSettles() {
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        var discovery = AttachmentDiscovery<String>(quietInterval: 0.25, emptyGrace: 1.0)
+
+        #expect(discovery.step([], at: t0) == .keepWaiting)
+        // Device shows up exactly at the grace boundary: sawAny latches, so we
+        // must not bail; the quiescence window then settles it.
+        #expect(discovery.step(["a"], at: t0.addingTimeInterval(1.0)) == .keepWaiting)
+        #expect(discovery.step(["a"], at: t0.addingTimeInterval(1.3)) == .settled)
+    }
+
     @Test("exact label matching prefers the button over duplicate static text")
     func exactLabelPrefersButton() throws {
         let text = element(1, summary: "Friends Static Text", role: "Static Text")
