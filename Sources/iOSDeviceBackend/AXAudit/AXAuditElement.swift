@@ -61,14 +61,25 @@ public struct AXAuditNode: Equatable, Sendable {
     public let element: AXAuditElement
     public let summary: String
     public let role: String
+    public let identifier: String?
     public let isIgnored: Bool
 
-    public init(element: AXAuditElement, summary: String, role: String, isIgnored: Bool) {
+    public init(element: AXAuditElement, summary: String, role: String, identifier: String? = nil, isIgnored: Bool) {
         self.element = element
         self.summary = summary
         self.role = role
+        self.identifier = identifier
         self.isIgnored = isIgnored
     }
 
     public var isAccessibilityElement: Bool { !role.isEmpty && !isIgnored }
+
+    /// Dedup identity for the tree walk. The daemon reuses an element token for
+    /// distinct logical elements (notably `deviceFetchSpecialElement: 0` aliases
+    /// the navigation-bar back button on a pushed screen), so the token alone is
+    /// not a safe key; the summary and role disambiguate them. `\u{1}` cannot
+    /// appear in a human-readable summary or role, so it is a safe separator.
+    var identityKey: String {
+        "\(element.token.base64EncodedString())\u{1}\(summary)\u{1}\(role)"
+    }
 }

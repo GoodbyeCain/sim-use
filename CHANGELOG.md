@@ -10,9 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `sim-use ios-device` (experimental): drive a development-signed app on a physical iPhone or iPad. `devices` lists attached devices, `ui` prints the foreground app's accessibility tree, and `tap --label` / `--label-contains` sends Activate to one unambiguous match. sim-use installs and signs no runner and needs no Developer Disk Image; the device must be unlocked and the target app must have `get-task-allow=true`. This channel intentionally omits coordinate tap, swipe and gesture because the daemon exposes no element geometry.
+- `sim-use ios-device ui` now renders each element's accessibility identifier as `#id`, and `sim-use ios-device tap` accepts it as a positional `#<id>` or `--id` (mirroring the simulator tap). This is a stable handle to prefer when a label is dynamic — a navigation-bar back button is labelled with the previous screen's title but keeps `#BackButton`. The `@N` alias and coordinate forms remain unavailable on this channel (handles expire between processes; the daemon exposes no geometry). Label and identifier matching go through the same case-sensitive `SelectorTextMatcher` policy the simulator and Android surfaces already use, so a selector behaves identically across all three.
 
 ### Fixed
 
+- `sim-use ios-device ui` no longer drops the navigation-bar back button (and any other element whose token the daemon aliases with the root). On a pushed screen `deviceFetchSpecialElement: 0` returns the back button as the root, so seeding the walk's visited set with the raw root token silently discarded it; the walk now dedups on `(token, summary, role)`, so the back button appears in the outline and is tappable with the ordinary `tap`.
 - Top-level and `sim-use ios` verbs now reject a physical iOS device UDID at resolution time with a pointer to `sim-use ios-device`, instead of misclassifying it as an Android serial and diagnosing a plugged-in iPhone as "not reachable via adb".
 - Wait for physical-device attachment notifications to settle so multiple USB-connected iOS devices are all discovered.
 - Reject empty physical-device hierarchies, missing or ambiguous tap targets, and invalid hierarchy concurrency instead of reporting success or silently choosing an element.

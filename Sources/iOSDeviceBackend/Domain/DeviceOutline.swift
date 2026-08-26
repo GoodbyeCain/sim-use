@@ -12,6 +12,7 @@ public struct DeviceOutline {
         public let depth: Int
         public let role: String
         public let label: String
+        public let identifier: String?
     }
 
     public let rows: [Row]
@@ -28,10 +29,16 @@ public struct DeviceOutline {
             }
             let depth = parentDepth + 1
             depths[index] = depth
+            // Render the identifier trimmed so the shown `#id` is exactly what
+            // `tap #<id>` matches — no leading/trailing whitespace to copy by
+            // mistake. A whitespace-only identifier renders as none.
+            let identifier = element.identifier?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             rows.append(Row(
                 depth: depth,
                 role: element.role,
-                label: Self.label(from: element.summary, role: element.role)
+                label: Self.label(from: element.summary, role: element.role),
+                identifier: identifier?.isEmpty == false ? identifier : nil
             ))
         }
         self.rows = rows
@@ -40,7 +47,9 @@ public struct DeviceOutline {
     public func rendered() -> String {
         rows.map { row in
             let indent = String(repeating: "  ", count: min(row.depth, 8))
-            return "\(indent)\(row.role)  \(row.label.isEmpty ? "" : "\"\(row.label)\"")"
+            let label = row.label.isEmpty ? "" : "\"\(row.label)\""
+            let id = row.identifier.map { "  #\($0)" } ?? ""
+            return "\(indent)\(row.role)  \(label)\(id)"
         }.joined(separator: "\n")
     }
 
