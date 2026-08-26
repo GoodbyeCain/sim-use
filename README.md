@@ -420,6 +420,8 @@ sim-use ios-device tap --label-contains "Reply" --element-type Button
 
 A device is addressed by UDID or ECID, and `--device` is optional only when exactly one is attached. Run `ui` again after every action: accessibility actions are fire-and-forget, so the follow-up read is the authoritative verification.
 
+Passing a physical device UDID to a top-level or `sim-use ios` verb fails fast with a pointer back to this surface — those verbs only drive iOS Simulators and Android devices.
+
 This channel deliberately differs from the simulator backend:
 
   * **No element geometry.** There is no coordinate tap, `swipe`, `gesture` or `multi-touch`. Only the exposed `tap` accessibility action is currently supported; unsupported simulator verbs are not routed here.

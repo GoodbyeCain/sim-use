@@ -41,11 +41,29 @@ public enum PlatformRouter {
         return udid.range(of: pattern, options: .regularExpression) != nil
     }
 
+    /// `true` when the UDID looks like a physical iOS device identifier:
+    /// modern 8-16 hex (`00008130-00066D2A10EB8D3A`, iPhone XS and later)
+    /// or legacy 40-hex (iPhone X and earlier). Physical devices are
+    /// served by the separate `sim-use ios-device` surface, so `resolve`
+    /// maps neither shape to a platform; the shape exists so device
+    /// resolution can reject early with a pointer there instead of
+    /// misreading the modern shape as an Android serial.
+    public static func looksLikePhysicalIOSDevice(_ udid: String) -> Bool {
+        let trimmed = udid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let modern = "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}$"
+        let legacy = "^[0-9A-Fa-f]{40}$"
+        return trimmed.range(of: modern, options: .regularExpression) != nil
+            || trimmed.range(of: legacy, options: .regularExpression) != nil
+    }
+
     /// `true` when the UDID looks like an Android serial.
     ///
     /// Heuristic, in order:
     ///   1. `emulator-…` prefix → always Android.
-    ///   2. iOS Simulator UDID shape → never Android.
+    ///   2. iOS Simulator or physical iOS device UDID shape → never
+    ///      Android. Without the physical exclusion the modern
+    ///      8-16-hex device UDID clears rule 3 and a plugged-in iPhone
+    ///      is diagnosed as an unreachable adb serial.
     ///   3. ASCII-only, length 4–32, allowed `[A-Za-z0-9._:-]`, with at
     ///      least one digit → Android.
     ///
@@ -58,6 +76,7 @@ public enum PlatformRouter {
         if trimmed.isEmpty { return false }
         if trimmed.hasPrefix("emulator-") { return true }
         if looksLikeIOSSim(trimmed) { return false }
+        if looksLikePhysicalIOSDevice(trimmed) { return false }
         guard trimmed.count >= 4, trimmed.count <= 32 else { return false }
         let allowed: (Character) -> Bool = { ch in
             ch.isASCII && (

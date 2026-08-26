@@ -58,7 +58,14 @@ public struct DeviceOptions: ParsableArguments {
             resolved = arg
             return
         }
-        resolved = try DeviceResolver.resolve(explicit: explicit)
+        let candidate = try DeviceResolver.resolve(explicit: explicit)
+        // Checked on the resolved value, not just the explicit flag, so a
+        // physical UDID arriving via SIM_USE_DEVICE / SIM_USE_UDID is
+        // rejected identically.
+        guard !PlatformRouter.looksLikePhysicalIOSDevice(candidate) else {
+            throw PhysicalIOSDeviceError(identifier: candidate)
+        }
+        resolved = candidate
     }
 
     /// Apply the same `--device` / `--udid` mutual-exclusion rule used
