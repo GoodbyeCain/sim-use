@@ -32,16 +32,29 @@ struct DeviceTapTargetResolver {
     ) throws -> DeviceElement {
         let selectorDescription: String
         let matchesElement: (DeviceElement) -> Bool
+        // The button-preference tie-break only makes sense for label selectors,
+        // where a button and a nested static-text node legitimately share a
+        // label. An accessibility identifier is a literal, unique handle (as on
+        // the simulator / Android surfaces), so a duplicate id is a genuine
+        // ambiguity to report, not something to silently resolve to the button.
+        let preferButtonOnAmbiguity: Bool
 
         if let identifier {
+            // Exact, case-sensitive comparison — an identifier is literal
+            // identity, not human text. Trim only incidental whitespace on the
+            // selector, matching the simulator's `--id`.
+            let target = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
             selectorDescription = "#\(identifier)"
-            matchesElement = { $0.identifier?.localizedCaseInsensitiveCompare(identifier) == .orderedSame }
+            matchesElement = { $0.identifier == target }
+            preferButtonOnAmbiguity = false
         } else if let label {
             selectorDescription = "--label '\(label)'"
             matchesElement = { DeviceOutline.label(from: $0.summary, role: $0.role).localizedCaseInsensitiveCompare(label) == .orderedSame }
+            preferButtonOnAmbiguity = true
         } else if let labelContains {
             selectorDescription = "--label-contains '\(labelContains)'"
             matchesElement = { DeviceOutline.label(from: $0.summary, role: $0.role).localizedCaseInsensitiveContains(labelContains) }
+            preferButtonOnAmbiguity = true
         } else {
             throw IOSDeviceCommandError.missingSelector
         }
@@ -64,10 +77,11 @@ struct DeviceTapTargetResolver {
 
         // Hierarchies commonly contain a button and a nested static-text node
         // with the same label. Match the actionable button just as the regular
-        // simulator resolver prefers actionable elements. (An identifier is
-        // expected to be unique, so this only really fires for label matches.)
-        let buttons = matches.filter { $0.role.localizedCaseInsensitiveContains("button") }
-        if buttons.count == 1 { return buttons[0] }
+        // simulator resolver prefers actionable elements.
+        if preferButtonOnAmbiguity {
+            let buttons = matches.filter { $0.role.localizedCaseInsensitiveContains("button") }
+            if buttons.count == 1 { return buttons[0] }
+        }
 
         throw IOSDeviceCommandError.multipleMatches(
             selector: selectorDescription,

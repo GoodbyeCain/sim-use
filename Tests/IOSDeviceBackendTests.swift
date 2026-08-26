@@ -107,6 +107,37 @@ struct IOSDeviceBackendTests {
         }
     }
 
+    @Test("a duplicated identifier is ambiguous and never silently prefers a Button")
+    func duplicateIdentifierIsAmbiguous() throws {
+        // Button-preference is a label-only tie-break; an id is meant to be
+        // unique, so a duplicate must error rather than resolve to the button.
+        let text = element(1, summary: "Save", role: "Static Text", identifier: "save")
+        let button = element(2, summary: "Save", role: "Button", identifier: "save")
+
+        #expect(throws: IOSDeviceCommandError.self) {
+            _ = try DeviceTapTargetResolver.resolve([text, button], identifier: "save")
+        }
+
+        // --element-type narrowing to a single match still resolves.
+        let narrowed = try DeviceTapTargetResolver.resolve([text, button], identifier: "save", elementType: "Button")
+        #expect(narrowed.element == button.element)
+    }
+
+    @Test("identifier matching is exact and case-sensitive, unlike labels")
+    func identifierMatchingIsExact() throws {
+        let upper = element(1, summary: "Back", role: "Button", identifier: "BackButton")
+        let lower = element(2, summary: "back", role: "Button", identifier: "backButton")
+
+        // Two differently-cased ids are distinct identities — exact match picks one.
+        let resolved = try DeviceTapTargetResolver.resolve([upper, lower], identifier: "BackButton")
+        #expect(resolved.element == upper.element)
+
+        // A case-mismatched query is a literal miss, not a fuzzy merge.
+        #expect(throws: IOSDeviceCommandError.self) {
+            _ = try DeviceTapTargetResolver.resolve([upper, lower], identifier: "BACKBUTTON")
+        }
+    }
+
     @Test("physical-device tap accepts #id but rejects an @N alias")
     func tapAcceptsIdentifierRejectsAlias() async throws {
         let atAlias = try await TestHelpers.runSimUseCommandAllowFailure("ios-device tap @1 --device not-a-device")
