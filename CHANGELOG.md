@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `sim-use ios-device` (experimental): drive a development-signed app on a physical iPhone or iPad. `devices` lists attached devices, `ui` prints the foreground app's accessibility tree, and `tap --label` / `--label-contains` sends Activate to one unambiguous match. sim-use installs and signs no runner and needs no Developer Disk Image; the device must be unlocked and the target app must have `get-task-allow=true`. This channel intentionally omits coordinate tap, swipe and gesture because the daemon exposes no element geometry.
+
+### Fixed
+
+- Top-level and `sim-use ios` verbs now reject a physical iOS device UDID at resolution time with a pointer to `sim-use ios-device`, instead of misclassifying it as an Android serial and diagnosing a plugged-in iPhone as "not reachable via adb".
+- Wait for physical-device attachment notifications to settle so multiple USB-connected iOS devices are all discovered.
+- Reject empty physical-device hierarchies, missing or ambiguous tap targets, and invalid hierarchy concurrency instead of reporting success or silently choosing an element.
+- Correlate DTX replies by both identifier and conversation index so unsolicited device events cannot satisfy an unrelated pending request.
 - `record-video --gif-markers` (all three surfaces): bracket a GIF with START/END marker cards (~1 s each) so the forever-looping clip has a visible boundary. Opt-in — the default output remains a faithful capture of the screen. A failed card render degrades to a marker-less GIF instead of failing the transcode.
 
 ## [0.13.0] - 2026-08-06

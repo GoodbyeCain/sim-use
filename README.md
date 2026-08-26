@@ -41,6 +41,7 @@ Plan, code, **verify**, ship — teach this CLI to your agent and close the last
 - [Install](#install)
 - [Platforms](#platforms)
 - [Commands](#commands)
+- [Physical iOS devices](#physical-ios-devices)
 - [Architecture](#architecture)
 - [Viewer](#viewer)
 - [Contributing](#contributing)
@@ -145,6 +146,8 @@ sim-use drives both **iOS Simulators** and **Android devices / emulators** throu
 
 For Android, run `sim-use android init --device <serial>` once to install the bridge APK. See `AGENTS.md` for Android toolchain setup.
 
+**Development-signed apps on physical iPhones and iPads** are reachable under a separate, experimental `sim-use ios-device` surface. sim-use installs and signs no runner and needs no Developer Disk Image; the connected device must be unlocked and the foreground app must have `get-task-allow=true`. That channel exposes no element geometry, so it trades coordinate taps, swipes and gestures for accessibility actions. See [Physical iOS devices](#physical-ios-devices).
+
 
 ## Commands
 
@@ -153,6 +156,7 @@ All device-scoped commands accept `--device <ID>` (optional when only one simula
   * **Top-level** — cross-platform verbs: `ui`, `tap`, `long-press`, `swipe`, `touch`, `multi-touch`, `type`, `paste`, `button`, `gesture`, `keyboard-state`, `screenshot`, `record-video`, `stream-video`, `app-state`. Same flags on iOS and Android.
   * **`sim-use ios <verb>`** — iOS-only: `key`, `key-combo`, `key-sequence`, `batch`.
   * **`sim-use android <verb>`** — Android-only: `init`, `devices`, `ping`, `scroll`.
+  * **`sim-use ios-device <verb>`** — physical iOS devices (experimental): `devices`, `ui`, `tap`. Separate from the top-level verbs because the capabilities differ — see [Physical iOS devices](#physical-ios-devices).
 
 Run `sim-use --help` or `sim-use <command> --help` for the full flag set.
 
@@ -383,9 +387,55 @@ SIM_USE_NO_DAEMON=1 sim-use ui --device $UDID
 Daemons self-exit after 600 s of idle and log to `/tmp/sim-use-<uid>/<UDID>.log`. Streaming commands (`screenshot`, `record-video`, `stream-video`) always run in-process regardless.
 
 
+## Physical iOS devices
+
+> **Experimental:** this surface intentionally supports development-signed target apps only. Its commands and compatibility may change while the device matrix grows.
+
+A connected iPhone or iPad is driven through its accessibility audit daemon over usbmux lockdown. sim-use installs no XCUITest runner, performs no signing and needs no Developer Disk Image. The foreground target app must already be signed with a Development provisioning profile whose final code-sign entitlements contain `get-task-allow=true`, and the device must be paired, trusted, unlocked and in Developer Mode. A Release-configuration build remains supported when installed with a Development profile.
+
+Distribution/Ad Hoc, TestFlight, App Store and system apps do not expose the hierarchy or actions required by this channel. `ui` and `tap` fail with an entitlement-oriented diagnostic instead of reporting an empty tree or a successful action.
+
+Verify the app before installing it when in doubt:
+
+```bash
+codesign -d --entitlements :- /path/to/MyApp.app
+# ... <key>get-task-allow</key><true/> ...
+```
+
+```bash
+sim-use ios-device devices
+# 00008140-000210603A40801C  My iPhone  iOS 27.0  Booted
+
+sim-use ios-device ui --device 00008140-000210603A40801C
+# Button  "Chats Button, Selected"
+# Button  "Friends"
+# ...
+# 117 elements (316 nodes) in 6647 ms
+
+sim-use ios-device tap --label "Friends" --element-type Button \
+  --device 00008140-000210603A40801C
+# Sent Activate to Friends Button
+
+# Dynamic labels can use the regular substring selector vocabulary.
+sim-use ios-device tap --label-contains "Reply" --element-type Button
+```
+
+A device is addressed by UDID or ECID, and `--device` is optional only when exactly one is attached. Run `ui` again after every action: accessibility actions are fire-and-forget, so the follow-up read is the authoritative verification.
+
+Passing a physical device UDID to a top-level or `sim-use ios` verb fails fast with a pointer back to this surface — those verbs only drive iOS Simulators and Android devices.
+
+This channel deliberately differs from the simulator backend:
+
+  * **No element geometry.** There is no coordinate tap, `swipe`, `gesture` or `multi-touch`. Only the exposed `tap` accessibility action is currently supported; unsupported simulator verbs are not routed here.
+  * **No cross-process aliases.** Element handles encode a live pointer and expire with their DTX connection. The outline therefore does not advertise `@N`; `tap` re-resolves `--label` or `--label-contains` in the same session that sends Activate.
+  * **Text output only.** The experimental `ios-device` commands do not yet support `--json`, screenshot or recording.
+  * **Slower snapshots.** A full tree costs a few seconds. `ui --fast` stops at labelled elements and is roughly 40% quicker, at the cost of about a quarter of the elements.
+  * **Reading order, not screen order.** With no frames to sort by, the outline follows accessibility nesting and reading order.
+
+
 ## Architecture
 
-sim-use drives iOS Simulators through the lower-level XCFrameworks of Facebook's [idb](https://github.com/facebook/idb) (statically linked), Apple's Accessibility APIs, and the simulator HID pipeline. Android devices are driven through an on-device bridge APK that exposes the AccessibilityService tree and input injection over HTTP, tunnelled via `adb forward`. Everything ships as a single binary; every command supports `--json` for machine consumption.
+sim-use drives iOS Simulators through the lower-level XCFrameworks of Facebook's [idb](https://github.com/facebook/idb) (statically linked), Apple's Accessibility APIs, and the simulator HID pipeline. Android devices are driven through an on-device bridge APK that exposes the AccessibilityService tree and input injection over HTTP, tunnelled via `adb forward`. Physical iOS devices go through a third path: idb's `FBDeviceControl` opens a lockdown service connection, over which sim-use speaks Apple's DTX message protocol to the accessibility audit daemon. Everything ships as a single binary. The established simulator and Android surfaces support `--json`; the experimental `ios-device` commands currently emit text only.
 
 
 ## Viewer
