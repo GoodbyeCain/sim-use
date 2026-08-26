@@ -215,7 +215,7 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
         @Option(help: "Exact rendered label from ios-device ui.")
         var label: String?
 
-        @Option(help: "Case-insensitive substring of an element label.")
+        @Option(help: "Case-sensitive substring of an element label.")
         var labelContains: String?
 
         @Option(help: "Accessibility role used to disambiguate matches, for example Button.")
