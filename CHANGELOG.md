@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Wait for physical-device attachment notifications to settle so multiple USB-connected iOS devices are all discovered.
 - Reject empty physical-device hierarchies, missing or ambiguous tap targets, and invalid hierarchy concurrency instead of reporting success or silently choosing an element.
 - Correlate DTX replies by both identifier and conversation index so unsolicited device events cannot satisfy an unrelated pending request.
+- `record-video --gif-markers` (all three surfaces): bracket a GIF with START/END marker cards (~1 s each) so the forever-looping clip has a visible boundary. Opt-in — the default output remains a faithful capture of the screen. A failed card render degrades to a marker-less GIF instead of failing the transcode.
 
 ## [0.13.0] - 2026-08-06
 

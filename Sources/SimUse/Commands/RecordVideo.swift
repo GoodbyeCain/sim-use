@@ -36,6 +36,9 @@ struct RecordVideo: SimUseExecutableCommand {
     @Option(help: "Output format: mp4, gif. Defaults to the --output extension when recognized, else mp4.")
     var format: RecordingFormat?
 
+    @Flag(help: "Bracket a GIF with START/END marker frames (opt-in; ignored for mp4).")
+    var gifMarkers: Bool = false
+
     @Option(help: "Output file path. Defaults to sim-use-video-<timestamp>.<format> in the current directory.")
     var output: String?
 
@@ -86,6 +89,7 @@ struct RecordVideo: SimUseExecutableCommand {
         sub.quality = quality
         sub.scale = scale
         sub.format = format
+        sub.gifMarkers = gifMarkers
         sub.output = output
         sub.device = device
         sub.json = json
@@ -99,7 +103,8 @@ struct RecordVideo: SimUseExecutableCommand {
             format: format,
             fps: fps,
             quality: quality,
-            scale: scale
+            scale: scale,
+            gifMarkers: gifMarkers
         )
         return ExecutionResult(path: outputURL.path)
     }
