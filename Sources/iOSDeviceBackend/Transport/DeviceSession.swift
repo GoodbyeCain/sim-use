@@ -51,6 +51,41 @@ struct AttachmentQuiescence<Identity: Hashable> {
     }
 }
 
+/// Drives one discovery pass: settle once the attachment set is quiet, but bail
+/// early when nothing has attached within `emptyGrace`.
+///
+/// Without the grace, an empty set (nothing plugged in) never satisfies the
+/// quiescence rule — it requires a non-empty, unchanged set — so discovery ran
+/// the full timeout (~5 s) on every host with no device. The grace only applies
+/// until the first device is seen; once `sawAny` latches, the full timeout is
+/// back in force so a multi-device attach burst still coalesces.
+struct AttachmentDiscovery<Identity: Hashable> {
+    enum Step: Equatable {
+        case keepWaiting
+        case settled
+        case bailEmpty
+    }
+
+    private var quiescence: AttachmentQuiescence<Identity>
+    private let emptyGrace: TimeInterval
+    private var sawAny = false
+    private var start: Date?
+
+    init(quietInterval: TimeInterval = 0.25, emptyGrace: TimeInterval) {
+        quiescence = AttachmentQuiescence(quietInterval: quietInterval)
+        self.emptyGrace = emptyGrace
+    }
+
+    mutating func step(_ identities: Set<Identity>, at now: Date) -> Step {
+        let start = start ?? now
+        self.start = start
+        sawAny = sawAny || !identities.isEmpty
+        if quiescence.observe(identities, at: now) { return .settled }
+        if !sawAny, now.timeIntervalSince(start) >= emptyGrace { return .bailEmpty }
+        return .keepWaiting
+    }
+}
+
 /// Opens the accessibility audit daemon on a physical device and scopes it to
 /// one piece of work.
 ///
@@ -152,18 +187,24 @@ public enum DeviceSession {
     /// fails with "not AMDevice backed". Pumping the loop here is what lets the
     /// attachment land.
     @MainActor
-    private static func attachedDevices(_ set: FBDeviceSet, timeout: TimeInterval = 5) -> [FBDevice] {
+    private static func attachedDevices(
+        _ set: FBDeviceSet,
+        timeout: TimeInterval = 5,
+        emptyGrace: TimeInterval = 1
+    ) -> [FBDevice] {
         let deadline = Date().addingTimeInterval(timeout)
         var attached: [FBDevice] = []
-        var quiescence = AttachmentQuiescence<ObjectIdentifier>(quietInterval: 0.25)
+        var discovery = AttachmentDiscovery<ObjectIdentifier>(emptyGrace: emptyGrace)
 
         while Date() < deadline {
             CFRunLoopRunInMode(.defaultMode, 0.05, true)
 
             attached = set.allDevices.filter { $0.amDevice != nil }
             let identities = Set(attached.map { ObjectIdentifier($0) })
-            if quiescence.observe(identities, at: Date()) {
-                return attached
+            switch discovery.step(identities, at: Date()) {
+            case .settled: return attached
+            case .bailEmpty: return []
+            case .keepWaiting: break
             }
         }
         return attached.isEmpty ? set.allDevices : attached
