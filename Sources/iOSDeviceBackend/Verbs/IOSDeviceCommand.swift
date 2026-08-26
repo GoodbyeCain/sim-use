@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import ArgumentParser
 import Foundation
+import SimUseCore
 
 enum IOSDeviceCommandError: Error, LocalizedError, CustomStringConvertible {
     case noMatchingElement(selector: String, available: [String])
@@ -30,8 +31,15 @@ struct DeviceTapTargetResolver {
         labelContains: String? = nil,
         elementType: String? = nil
     ) throws -> DeviceElement {
+        // Elements sim-use can act on, narrowed by --element-type first (as the
+        // simulator resolver does), so the selector match runs on the same pool.
+        let accessible = elements.filter(\.isAccessibilityElement)
+        let pool = elementType.map { type in
+            accessible.filter { $0.role.localizedCaseInsensitiveCompare(type) == .orderedSame }
+        } ?? accessible
+
         let selectorDescription: String
-        let matchesElement: (DeviceElement) -> Bool
+        let matches: [DeviceElement]
         // The button-preference tie-break only makes sense for label selectors,
         // where a button and a nested static-text node legitimately share a
         // label. An accessibility identifier is a literal, unique handle (as on
@@ -41,30 +49,30 @@ struct DeviceTapTargetResolver {
 
         if let identifier {
             // Exact, case-sensitive comparison — an identifier is literal
-            // identity, not human text. Trim only incidental whitespace on the
-            // selector, matching the simulator's `--id`.
+            // identity, not human text — trimming both sides, matching the
+            // simulator's `--id` (`normalizedUniqueId == trimmed query`).
             let target = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
             selectorDescription = "#\(identifier)"
-            matchesElement = { $0.identifier == target }
+            matches = pool.filter { $0.identifier?.trimmingCharacters(in: .whitespacesAndNewlines) == target }
             preferButtonOnAmbiguity = false
         } else if let label {
+            // Use the shared text-matching policy (case-sensitive, exact-first
+            // with a whitespace-collapsed fallback) that the simulator and
+            // Android resolvers use, so label matching does not drift per
+            // platform.
             selectorDescription = "--label '\(label)'"
-            matchesElement = { DeviceOutline.label(from: $0.summary, role: $0.role).localizedCaseInsensitiveCompare(label) == .orderedSame }
+            matches = SelectorTextMatcher.filterEquals(pool, query: label) {
+                DeviceOutline.label(from: $0.summary, role: $0.role)
+            }
             preferButtonOnAmbiguity = true
         } else if let labelContains {
             selectorDescription = "--label-contains '\(labelContains)'"
-            matchesElement = { DeviceOutline.label(from: $0.summary, role: $0.role).localizedCaseInsensitiveContains(labelContains) }
+            matches = SelectorTextMatcher.filterContains(pool, needle: labelContains) {
+                DeviceOutline.label(from: $0.summary, role: $0.role)
+            }
             preferButtonOnAmbiguity = true
         } else {
             throw IOSDeviceCommandError.missingSelector
-        }
-
-        let accessible = elements.filter(\.isAccessibilityElement)
-        let matches = accessible.filter { element in
-            matchesElement(element)
-                && elementType.map {
-                    element.role.localizedCaseInsensitiveCompare($0) == .orderedSame
-                } != false
         }
 
         guard !matches.isEmpty else {

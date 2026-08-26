@@ -123,6 +123,29 @@ struct IOSDeviceBackendTests {
         #expect(narrowed.element == button.element)
     }
 
+    @Test("a whitespace-padded daemon identifier still matches the clean selector")
+    func identifierMatchingTrimsBothSides() throws {
+        // The daemon can report a padded id; ui renders it trimmed, so a user
+        // (or the docs) passes the clean form. Both sides must trim to match.
+        let padded = element(1, summary: "sim-use Playground Button", role: "Button", identifier: " BackButton ")
+
+        let byClean = try DeviceTapTargetResolver.resolve([padded], identifier: "BackButton")
+        #expect(byClean.element == padded.element)
+
+        let byPadded = try DeviceTapTargetResolver.resolve([padded], identifier: "  BackButton  ")
+        #expect(byPadded.element == padded.element)
+    }
+
+    @Test("the outline renders identifiers trimmed so the shown #id is copy-safe")
+    func outlineTrimsIdentifierForDisplay() {
+        let rendered = DeviceOutline(elements: [
+            element(1, summary: "Back Button", role: "Button", identifier: " BackButton "),
+        ]).rendered()
+
+        #expect(rendered.contains("#BackButton"))
+        #expect(!rendered.contains("# BackButton "))
+    }
+
     @Test("identifier matching is exact and case-sensitive, unlike labels")
     func identifierMatchingIsExact() throws {
         let upper = element(1, summary: "Back", role: "Button", identifier: "BackButton")
@@ -147,6 +170,20 @@ struct IOSDeviceBackendTests {
         let help = try await TestHelpers.runSimUseCommand("ios-device tap --help")
         #expect(help.output.contains("--id <id>"))
         #expect(help.output.contains("#<id>"))
+    }
+
+    @Test("label matching is case-sensitive, using the shared simulator/Android policy")
+    func labelMatchingIsCaseSensitive() throws {
+        let button = element(1, summary: "Friends Button", role: "Button")
+
+        let exact = try DeviceTapTargetResolver.resolve([button], label: "Friends")
+        #expect(exact.element == button.element)
+
+        // Wrong case is a miss — the shared SelectorTextMatcher is case-sensitive,
+        // so physical-device label matching no longer drifts from the simulator.
+        #expect(throws: IOSDeviceCommandError.self) {
+            _ = try DeviceTapTargetResolver.resolve([button], label: "friends")
+        }
     }
 
     @Test("element type narrows a contains selector")

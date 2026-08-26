@@ -29,11 +29,16 @@ public struct DeviceOutline {
             }
             let depth = parentDepth + 1
             depths[index] = depth
+            // Render the identifier trimmed so the shown `#id` is exactly what
+            // `tap #<id>` matches — no leading/trailing whitespace to copy by
+            // mistake. A whitespace-only identifier renders as none.
+            let identifier = element.identifier?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             rows.append(Row(
                 depth: depth,
                 role: element.role,
                 label: Self.label(from: element.summary, role: element.role),
-                identifier: element.identifier?.isEmpty == false ? element.identifier : nil
+                identifier: identifier?.isEmpty == false ? identifier : nil
             ))
         }
         self.rows = rows
