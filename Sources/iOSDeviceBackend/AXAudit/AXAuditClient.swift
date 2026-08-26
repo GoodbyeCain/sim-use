@@ -106,6 +106,7 @@ public struct AXAuditClient: Sendable {
                 element: child,
                 summary: node["HumanReadableDescriptionValue_v1"]?.stringValue ?? "",
                 role: node["HumanReadableRoleDescriptionValue_v1"]?.stringValue ?? "",
+                identifier: node["AuditElementValue_v1"]?["AccessibilityIdentifier_v1"]?.stringValue,
                 isIgnored: node["IsIgnoredValue_v1"]?.boolValue ?? false
             )
         }

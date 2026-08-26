@@ -132,6 +132,20 @@ struct IOSDeviceBackendTests {
         #expect(rendered.contains("Button  \"Friends\""))
     }
 
+    @Test("physical-device outline renders a stable accessibility identifier")
+    func outlineRendersIdentifier() {
+        let rendered = DeviceOutline(elements: [
+            element(1, summary: "sim-use Playground Button", role: "Button", identifier: "BackButton"),
+            element(2, summary: "Friends Button", role: "Button"),
+        ]).rendered()
+
+        // The dynamic back-button label is joined to its stable id so an agent
+        // can key off the id instead of the previous screen's title.
+        #expect(rendered.contains("Button  \"sim-use Playground\"  #BackButton"))
+        // Elements without an identifier render no trailing `#`.
+        #expect(rendered.contains("Button  \"Friends\"\n") || rendered.hasSuffix("Button  \"Friends\""))
+    }
+
     @Test("tap help uses the shared label selector vocabulary")
     func tapHelpUsesStandardSelectors() async throws {
         let result = try await TestHelpers.runSimUseCommand("ios-device tap --help")
@@ -170,12 +184,14 @@ struct IOSDeviceBackendTests {
         _ tokenByte: UInt8,
         summary: String,
         role: String,
+        identifier: String? = nil,
         isIgnored: Bool = false
     ) -> DeviceElement {
         DeviceElement(
             element: AXAuditElement(token: Data(repeating: tokenByte, count: 20)),
             summary: summary,
             role: role,
+            identifier: identifier,
             depth: 0,
             parent: nil,
             isIgnored: isIgnored

@@ -409,6 +409,7 @@ sim-use ios-device devices
 sim-use ios-device ui --device 00008140-000210603A40801C
 # Button  "Chats Button, Selected"
 # Button  "Friends"
+# Button  "Settings"  #settingsButton
 # ...
 # 117 elements (316 nodes) in 6647 ms
 
@@ -427,7 +428,7 @@ Passing a physical device UDID to a top-level or `sim-use ios` verb fails fast w
 This channel deliberately differs from the simulator backend:
 
   * **No element geometry.** There is no coordinate tap, `swipe`, `gesture` or `multi-touch`. Only the exposed `tap` accessibility action is currently supported; unsupported simulator verbs are not routed here.
-  * **No cross-process aliases.** Element handles encode a live pointer and expire with their DTX connection. The outline therefore does not advertise `@N`; `tap` re-resolves `--label` or `--label-contains` in the same session that sends Activate.
+  * **No `@N` aliases, but stable `#identifier`s.** Element handles encode a live pointer and expire with their DTX connection, so the outline advertises no `@N`; `tap` re-resolves `--label` or `--label-contains` in the same session that sends Activate. It does surface each element's accessibility identifier as `#id` for reference — useful when a label is dynamic, such as a navigation-bar back button, which is labelled with the previous screen's title but keeps `#BackButton`. The back button is an ordinary row in the outline; tap it by the label shown in the same read.
   * **Text output only.** The experimental `ios-device` commands do not yet support `--json`, screenshot or recording.
   * **Slower snapshots.** A full tree costs a few seconds. `ui --fast` stops at labelled elements and is roughly 40% quicker, at the cost of about a quarter of the elements.
   * **Reading order, not screen order.** With no frames to sort by, the outline follows accessibility nesting and reading order.
