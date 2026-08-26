@@ -118,6 +118,106 @@ struct IOSDeviceBackendTests {
         #expect(resolved.element == button.element)
     }
 
+    @Test("identifier selector matches the stable id, not the dynamic label")
+    func identifierSelectorMatches() throws {
+        let back = element(1, summary: "sim-use Playground Button", role: "Button", identifier: "BackButton")
+        let other = element(2, summary: "Settings Button", role: "Button", identifier: "settingsButton")
+
+        let resolved = try DeviceTapTargetResolver.resolve(
+            [back, other],
+            identifier: "BackButton"
+        )
+
+        #expect(resolved.element == back.element)
+    }
+
+    @Test("a missing identifier fails loudly")
+    func missingIdentifierFails() {
+        let button = element(1, summary: "Settings Button", role: "Button", identifier: "settingsButton")
+        #expect(throws: IOSDeviceCommandError.self) {
+            _ = try DeviceTapTargetResolver.resolve([button], identifier: "BackButton")
+        }
+    }
+
+    @Test("a duplicated identifier is ambiguous and never silently prefers a Button")
+    func duplicateIdentifierIsAmbiguous() throws {
+        // Button-preference is a label-only tie-break; an id is meant to be
+        // unique, so a duplicate must error rather than resolve to the button.
+        let text = element(1, summary: "Save", role: "Static Text", identifier: "save")
+        let button = element(2, summary: "Save", role: "Button", identifier: "save")
+
+        #expect(throws: IOSDeviceCommandError.self) {
+            _ = try DeviceTapTargetResolver.resolve([text, button], identifier: "save")
+        }
+
+        // --element-type narrowing to a single match still resolves.
+        let narrowed = try DeviceTapTargetResolver.resolve([text, button], identifier: "save", elementType: "Button")
+        #expect(narrowed.element == button.element)
+    }
+
+    @Test("a whitespace-padded daemon identifier still matches the clean selector")
+    func identifierMatchingTrimsBothSides() throws {
+        // The daemon can report a padded id; ui renders it trimmed, so a user
+        // (or the docs) passes the clean form. Both sides must trim to match.
+        let padded = element(1, summary: "sim-use Playground Button", role: "Button", identifier: " BackButton ")
+
+        let byClean = try DeviceTapTargetResolver.resolve([padded], identifier: "BackButton")
+        #expect(byClean.element == padded.element)
+
+        let byPadded = try DeviceTapTargetResolver.resolve([padded], identifier: "  BackButton  ")
+        #expect(byPadded.element == padded.element)
+    }
+
+    @Test("the outline renders identifiers trimmed so the shown #id is copy-safe")
+    func outlineTrimsIdentifierForDisplay() {
+        let rendered = DeviceOutline(elements: [
+            element(1, summary: "Back Button", role: "Button", identifier: " BackButton "),
+        ]).rendered()
+
+        #expect(rendered.contains("#BackButton"))
+        #expect(!rendered.contains("# BackButton "))
+    }
+
+    @Test("identifier matching is exact and case-sensitive, unlike labels")
+    func identifierMatchingIsExact() throws {
+        let upper = element(1, summary: "Back", role: "Button", identifier: "BackButton")
+        let lower = element(2, summary: "back", role: "Button", identifier: "backButton")
+
+        // Two differently-cased ids are distinct identities — exact match picks one.
+        let resolved = try DeviceTapTargetResolver.resolve([upper, lower], identifier: "BackButton")
+        #expect(resolved.element == upper.element)
+
+        // A case-mismatched query is a literal miss, not a fuzzy merge.
+        #expect(throws: IOSDeviceCommandError.self) {
+            _ = try DeviceTapTargetResolver.resolve([upper, lower], identifier: "BACKBUTTON")
+        }
+    }
+
+    @Test("physical-device tap accepts #id but rejects an @N alias")
+    func tapAcceptsIdentifierRejectsAlias() async throws {
+        let atAlias = try await TestHelpers.runSimUseCommandAllowFailure("ios-device tap @1 --device not-a-device")
+        #expect(atAlias.exitCode != 0)
+        #expect(atAlias.output.contains("@N"))
+
+        let help = try await TestHelpers.runSimUseCommand("ios-device tap --help")
+        #expect(help.output.contains("--id <id>"))
+        #expect(help.output.contains("#<id>"))
+    }
+
+    @Test("label matching is case-sensitive, using the shared simulator/Android policy")
+    func labelMatchingIsCaseSensitive() throws {
+        let button = element(1, summary: "Friends Button", role: "Button")
+
+        let exact = try DeviceTapTargetResolver.resolve([button], label: "Friends")
+        #expect(exact.element == button.element)
+
+        // Wrong case is a miss — the shared SelectorTextMatcher is case-sensitive,
+        // so physical-device label matching no longer drifts from the simulator.
+        #expect(throws: IOSDeviceCommandError.self) {
+            _ = try DeviceTapTargetResolver.resolve([button], label: "friends")
+        }
+    }
+
     @Test("element type narrows a contains selector")
     func elementTypeNarrowsContainsSelector() throws {
         let button = element(1, summary: "Friends Button", role: "Button")
@@ -164,6 +264,20 @@ struct IOSDeviceBackendTests {
         #expect(rendered.contains("Button  \"Friends\""))
     }
 
+    @Test("physical-device outline renders a stable accessibility identifier")
+    func outlineRendersIdentifier() {
+        let rendered = DeviceOutline(elements: [
+            element(1, summary: "sim-use Playground Button", role: "Button", identifier: "BackButton"),
+            element(2, summary: "Friends Button", role: "Button"),
+        ]).rendered()
+
+        // The dynamic back-button label is joined to its stable id so an agent
+        // can key off the id instead of the previous screen's title.
+        #expect(rendered.contains("Button  \"sim-use Playground\"  #BackButton"))
+        // Elements without an identifier render no trailing `#`.
+        #expect(rendered.contains("Button  \"Friends\"\n") || rendered.hasSuffix("Button  \"Friends\""))
+    }
+
     @Test("tap help uses the shared label selector vocabulary")
     func tapHelpUsesStandardSelectors() async throws {
         let result = try await TestHelpers.runSimUseCommand("ios-device tap --help")
@@ -202,12 +316,14 @@ struct IOSDeviceBackendTests {
         _ tokenByte: UInt8,
         summary: String,
         role: String,
+        identifier: String? = nil,
         isIgnored: Bool = false
     ) -> DeviceElement {
         DeviceElement(
             element: AXAuditElement(token: Data(repeating: tokenByte, count: 20)),
             summary: summary,
             role: role,
+            identifier: identifier,
             depth: 0,
             parent: nil,
             isIgnored: isIgnored

@@ -5,9 +5,28 @@ public struct DeviceElement: Sendable {
     public let element: AXAuditElement
     public let summary: String
     public let role: String
+    public let identifier: String?
     public let depth: Int
     public let parent: Int?
     public let isIgnored: Bool
+
+    public init(
+        element: AXAuditElement,
+        summary: String,
+        role: String,
+        identifier: String? = nil,
+        depth: Int,
+        parent: Int?,
+        isIgnored: Bool
+    ) {
+        self.element = element
+        self.summary = summary
+        self.role = role
+        self.identifier = identifier
+        self.depth = depth
+        self.parent = parent
+        self.isIgnored = isIgnored
+    }
 
     public var isAccessibilityElement: Bool { !role.isEmpty && !isIgnored }
 }
@@ -47,7 +66,13 @@ public struct DeviceTreeFetcher: Sendable {
     public func fetchTree() async throws -> [DeviceElement] {
         let root = try await client.rootElement()
         var discovered: [DeviceElement] = []
-        var visited: Set<AXAuditElement> = [root]
+        // Dedup on (token, summary, role), not the bare token. On a pushed
+        // screen `deviceFetchSpecialElement: 0` returns the navigation-bar back
+        // button as the root — its token then aliases a real element, so seeding
+        // `visited` with the root token silently dropped the back button (it read
+        // as "root, already seen"). The composite key keeps the back button while
+        // still collapsing the genuine repeats the deep child walk produces.
+        var visited: Set<String> = []
         var frontier: [(element: AXAuditElement, index: Int?)] = [(root, nil)]
         var depth = 0
 
@@ -57,11 +82,12 @@ public struct DeviceTreeFetcher: Sendable {
 
             for (offset, children) in expansions.enumerated() {
                 let parent = frontier[offset].index
-                for child in children where visited.insert(child.element).inserted {
+                for child in children where visited.insert(child.identityKey).inserted {
                     discovered.append(DeviceElement(
                         element: child.element,
                         summary: child.summary,
                         role: child.role,
+                        identifier: child.identifier,
                         depth: depth,
                         parent: parent,
                         isIgnored: child.isIgnored
