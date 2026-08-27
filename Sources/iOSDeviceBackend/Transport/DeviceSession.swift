@@ -4,7 +4,7 @@ import FBDeviceControl
 import Foundation
 import SimUseCore
 
-public enum DeviceSessionError: Error, LocalizedError, CustomStringConvertible {
+public enum DeviceSessionError: Error, LocalizedError, CustomStringConvertible, HintProviding {
     case noDevices
     case selectionRequired(available: [String])
     case deviceNotFound(identifier: String, available: [String])
@@ -17,12 +17,27 @@ public enum DeviceSessionError: Error, LocalizedError, CustomStringConvertible {
         case .noDevices:
             return "no physical iOS devices are connected"
         case let .selectionRequired(available):
-            return "multiple physical iOS devices are connected (\(available.joined(separator: ", "))); specify --device with a UDID or ECID"
+            return "multiple physical iOS devices are connected (\(available.joined(separator: ", ")))"
         case let .deviceNotFound(identifier, available):
             let known = available.isEmpty ? "none connected" : available.joined(separator: ", ")
             return "no physical iOS device with identifier \(identifier) (connected: \(known))"
         case let .serviceUnavailable(underlying):
             return "could not open the accessibility service on the device: \(underlying.localizedDescription)"
+        }
+    }
+
+    // Recovery advice rides the shared `hint` channel — structurally in
+    // the `--json` error envelope, as a `Hint:` line on the text path.
+    public var hint: String? {
+        switch self {
+        case .noDevices:
+            return "Connect the device over USB and make sure it is unlocked, paired and trusted; 'sim-use devices' shows every attached target."
+        case .selectionRequired:
+            return "Pass --device with the UDID or ECID of one of the listed devices."
+        case .deviceNotFound:
+            return "Run 'sim-use ios-device devices' to list attached devices. A freshly attached device may be listed by ECID until a session opens; either identifier is accepted."
+        case .serviceUnavailable:
+            return "Make sure the device is unlocked, trusts this Mac, and has Developer Mode enabled (Settings > Privacy & Security > Developer Mode)."
         }
     }
 }

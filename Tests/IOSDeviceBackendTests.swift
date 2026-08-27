@@ -473,13 +473,148 @@ struct IOSDeviceBackendTests {
 
     @Test("device selection errors tell the user how to recover")
     func deviceSelectionErrorsAreActionable() {
-        let none = DeviceSessionError.noDevices.localizedDescription
-        let multiple = DeviceSessionError.selectionRequired(available: ["device-a", "device-b"]).localizedDescription
+        let none = DeviceSessionError.noDevices
+        let multiple = DeviceSessionError.selectionRequired(available: ["device-a", "device-b"])
 
-        #expect(none.contains("no physical iOS devices"))
-        #expect(multiple.contains("--device"))
-        #expect(multiple.contains("device-a"))
-        #expect(multiple.contains("device-b"))
+        #expect(none.localizedDescription.contains("no physical iOS devices"))
+        #expect(none.hint?.contains("USB") == true)
+        // The candidate list stays in the description; the recovery advice
+        // moved to the hint channel so the --json envelope carries it
+        // structurally.
+        #expect(multiple.localizedDescription.contains("device-a"))
+        #expect(multiple.localizedDescription.contains("device-b"))
+        #expect(multiple.hint?.contains("--device") == true)
+    }
+
+    @Test("tap resolution errors carry their recovery advice as hints")
+    func tapResolutionErrorsCarryHints() {
+        let missing = IOSDeviceCommandError.noMatchingElement(selector: "--label 'X'", available: ["'A' [Button]"])
+        let ambiguous = IOSDeviceCommandError.multipleMatches(selector: "--label 'Save'", matches: ["'Save' [Button]", "'Save' [Static Text]"])
+
+        #expect(missing.localizedDescription.contains("'A' [Button]"))
+        #expect(missing.hint?.contains("ios-device ui") == true)
+        #expect(ambiguous.localizedDescription.contains("'Save' [Static Text]"))
+        #expect(ambiguous.hint?.contains("--element-type") == true)
+        #expect(IOSDeviceCommandError.missingSelector.hint == nil)
+    }
+
+    // MARK: - SimUseExecutableCommand conformance (#108)
+
+    @Test("every ios-device verb advertises --json in its help")
+    func verbsAdvertiseJSONFlag() async throws {
+        for verb in ["devices", "ui", "screenshot", "tap"] {
+            let result = try await TestHelpers.runSimUseCommand("ios-device \(verb) --help")
+            #expect(result.output.contains("--json"), "\(verb) --help should document --json")
+        }
+    }
+
+    @Test("ios-device verbs stay in-process — no daemon UDID is ever offered")
+    func verbsDoNotOfferADaemonUDID() throws {
+        // PR B is structural alignment only: every ios-device call still
+        // opens its own DTX session. Daemon session persistence is #120.
+        try #expect(IOSDeviceCommand.Devices.parse([]).simulatorUDIDForDaemon == nil)
+        try #expect(IOSDeviceCommand.UI.parse(["--device", "X"]).simulatorUDIDForDaemon == nil)
+        try #expect(IOSDeviceCommand.Screenshot.parse(["--device", "X"]).simulatorUDIDForDaemon == nil)
+        try #expect(IOSDeviceCommand.Tap.parse(["--id", "x", "--device", "X"]).simulatorUDIDForDaemon == nil)
+    }
+
+    @Test("devices format keeps the legacy row shape and no-device line")
+    func devicesFormatMatchesLegacyShape() throws {
+        let command = try IOSDeviceCommand.Devices.parse([])
+
+        #expect(command.format(.init(devices: [])).stdout == "No physical iOS devices connected.\n")
+
+        let summary = DeviceSession.DeviceSummary(
+            udid: "00008130-00066D2A10EB8D3A",
+            name: "iPhone One",
+            osVersion: "iOS 26.6",
+            state: "Booted"
+        )
+        let listed = command.format(.init(devices: [summary.unifiedDevice]))
+        #expect(listed.stdout == "00008130-00066D2A10EB8D3A  iPhone One  iOS 26.6  Booted\n")
+    }
+
+    @Test("devices --json rows reuse the unified Device schema")
+    func devicesResultEncodesUnifiedRows() throws {
+        let summary = DeviceSession.DeviceSummary(
+            udid: "00008130-00066D2A10EB8D3A",
+            name: "iPhone One",
+            osVersion: "iOS 26.6",
+            state: "Booted"
+        )
+        let data = try JSONEncoder().encode(IOSDeviceCommand.Devices.ExecutionResult(devices: [summary.unifiedDevice]))
+        let json = String(decoding: data, as: UTF8.self)
+
+        // Same keys as top-level `sim-use devices --json`: canonical
+        // `deviceId`, orthogonal `kind`, `runtime` carrying the OS.
+        #expect(json.contains("\"deviceId\":\"00008130-00066D2A10EB8D3A\""))
+        #expect(json.contains("\"kind\":\"physical\""))
+        #expect(json.contains("\"runtime\":\"iOS 26.6\""))
+        #expect(!json.contains("\"osVersion\""))
+    }
+
+    @Test("ui format reproduces the outline plus summary line byte-for-byte")
+    func uiFormatMatchesLegacyShape() throws {
+        let outline = DeviceOutline(elements: [
+            element(1, summary: "Friends Button", role: "Button"),
+        ])
+        let result = IOSDeviceCommand.UI.ExecutionResult(
+            outline: outline.rendered(),
+            rows: outline.rows,
+            elements: outline.rows.count,
+            nodes: 3,
+            elapsedMs: 1234
+        )
+        let output = try IOSDeviceCommand.UI.parse([]).format(result)
+
+        #expect(output.stdout == "Button  \"Friends\"\n\n1 elements (3 nodes) in 1234 ms\n")
+        #expect(output.stderr.isEmpty)
+    }
+
+    @Test("ui --json rows omit the identifier key when the element has none")
+    func uiResultRowsOmitNilIdentifier() throws {
+        let rows = DeviceOutline(elements: [
+            element(1, summary: "Back Button", role: "Button", identifier: "BackButton"),
+            element(2, summary: "Friends Button", role: "Button"),
+        ]).rows
+        let data = try JSONEncoder().encode(rows)
+        let json = String(decoding: data, as: UTF8.self)
+
+        #expect(json.contains("\"identifier\":\"BackButton\""))
+        #expect(!json.contains("\"identifier\":null"))
+
+        let decoded = try JSONDecoder().decode([DeviceOutline.Row].self, from: data)
+        #expect(decoded == rows)
+    }
+
+    @Test("tap format reports the matched element in the resolver vocabulary")
+    func tapFormatMatchesLegacyShape() throws {
+        let command = try IOSDeviceCommand.Tap.parse(["--id", "settingsButton"])
+
+        let withId = command.format(.init(action: "Activate", role: "Button", label: "Settings", identifier: "settingsButton"))
+        #expect(withId.stdout == "Sent Activate to 'Settings' [Button] #settingsButton\n")
+
+        let withoutId = command.format(.init(action: "Activate", role: "Button", label: "Friends", identifier: nil))
+        #expect(withoutId.stdout == "Sent Activate to 'Friends' [Button]\n")
+    }
+
+    @Test("tap --json omits the identifier key when the element has none")
+    func tapResultOmitsNilIdentifier() throws {
+        let data = try JSONEncoder().encode(
+            IOSDeviceCommand.Tap.ExecutionResult(action: "Activate", role: "Button", label: "Friends", identifier: nil)
+        )
+        let json = String(decoding: data, as: UTF8.self)
+
+        #expect(json.contains("\"action\":\"Activate\""))
+        #expect(!json.contains("\"identifier\""))
+    }
+
+    @Test("screenshot format prints the path on stdout and the confirmation on stderr")
+    func screenshotFormatMatchesLegacyShape() throws {
+        let output = try IOSDeviceCommand.Screenshot.parse([]).format(.init(path: "/tmp/shot.png"))
+
+        #expect(output.stdout == "/tmp/shot.png\n")
+        #expect(output.stderr == "Screenshot saved to /tmp/shot.png\n")
     }
 
     private func element(

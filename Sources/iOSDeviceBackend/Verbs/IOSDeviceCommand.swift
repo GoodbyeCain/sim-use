@@ -3,7 +3,7 @@ import ArgumentParser
 import Foundation
 import SimUseCore
 
-enum IOSDeviceCommandError: Error, LocalizedError, CustomStringConvertible {
+enum IOSDeviceCommandError: Error, LocalizedError, CustomStringConvertible, HintProviding {
     case noMatchingElement(selector: String, available: [String])
     case multipleMatches(selector: String, matches: [String])
     case missingSelector
@@ -14,11 +14,25 @@ enum IOSDeviceCommandError: Error, LocalizedError, CustomStringConvertible {
         switch self {
         case let .noMatchingElement(selector, available):
             let candidates = available.isEmpty ? "none" : available.joined(separator: ", ")
-            return "no accessibility element matched \(selector) on screen (available: \(candidates)); run 'sim-use ios-device ui' and choose a visible label"
+            return "no accessibility element matched \(selector) on screen (available: \(candidates))"
         case let .multipleMatches(selector, matches):
-            return "\(selector) matched multiple accessibility elements (\(matches.joined(separator: ", "))); use --label for an exact match or add --element-type"
+            return "\(selector) matched multiple accessibility elements (\(matches.joined(separator: ", ")))"
         case .missingSelector:
-            return "tap requires exactly one of --label or --label-contains"
+            return "tap requires exactly one of `#id` / --id, --label, or --label-contains"
+        }
+    }
+
+    // The recovery advice rides the `hint` channel so the `--json` error
+    // envelope carries it structurally; the text path prints it as a
+    // `Hint:` line after the error.
+    var hint: String? {
+        switch self {
+        case .noMatchingElement:
+            return "Run 'sim-use ios-device ui' and choose a visible label or #id from the current screen."
+        case .multipleMatches:
+            return "Use --label for an exact match, or add --element-type to disambiguate."
+        case .missingSelector:
+            return nil
         }
     }
 }
@@ -98,8 +112,18 @@ struct DeviceTapTargetResolver {
     }
 
     static func describe(_ element: DeviceElement) -> String {
-        let id = element.identifier.map { " #\($0)" } ?? ""
-        return "'\(DeviceOutline.label(from: element.summary, role: element.role))' [\(element.role)]\(id)"
+        describe(
+            role: element.role,
+            label: DeviceOutline.label(from: element.summary, role: element.role),
+            identifier: element.identifier
+        )
+    }
+
+    /// Field-based variant so `format(_:)` can reproduce the same string
+    /// from a decoded `ExecutionResult` without a live element.
+    static func describe(role: String, label: String, identifier: String?) -> String {
+        let id = identifier.map { " #\($0)" } ?? ""
+        return "'\(label)' [\(role)]\(id)"
     }
 }
 
@@ -134,23 +158,39 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
         var udid: String?
     }
 
-    struct Devices: AsyncParsableCommand {
+    struct Devices: SimUseExecutableCommand {
         static let configuration = CommandConfiguration(
             commandName: "devices",
             abstract: "List connected physical iOS devices."
         )
 
-        func run() async throws {
-            let devices = try await DeviceSession.connectedDevices()
-            if devices.isEmpty {
-                print("No physical iOS devices connected.")
-                return
+        @OptionGroup var json: JSONOutputOptions
+
+        var jsonOutput: Bool { json.enabled }
+
+        /// Rows reuse the unified `Device` schema (`deviceId` / `kind` /
+        /// `runtime` keys) that top-level `sim-use devices --json` emits,
+        /// so consumers parse one shape regardless of which listing they
+        /// called.
+        struct ExecutionResult: Codable {
+            let devices: [Device]
+        }
+
+        func execute() async throws -> ExecutionResult {
+            ExecutionResult(devices: try await DeviceSession.connectedDevices().map(\.unifiedDevice))
+        }
+
+        func format(_ result: ExecutionResult) -> CommandOutput {
+            guard !result.devices.isEmpty else {
+                return .line("No physical iOS devices connected.")
             }
-            devices.forEach { print("\($0.udid)  \($0.name)  \($0.osVersion)  \($0.state)") }
+            return .lines(result.devices.map { device in
+                [device.udid, device.name, device.runtime ?? "-", device.state].joined(separator: "  ")
+            })
         }
     }
 
-    struct UI: AsyncParsableCommand {
+    struct UI: SimUseExecutableCommand {
         static let configuration = CommandConfiguration(
             commandName: "ui",
             abstract: "Print an outline of the foreground app's accessibility tree."
@@ -167,24 +207,50 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
         @Flag(help: "Stop descending at labelled elements. Faster, but misses nested text.")
         var fast = false
 
+        @OptionGroup var json: JSONOutputOptions
+
+        var jsonOutput: Bool { json.enabled }
+
+        /// `rows` is the structured outline; `outline` is the same rows
+        /// rendered as the text the default mode prints, mirroring the
+        /// simulator envelope where agents read `data.outline` directly.
+        /// There are deliberately no `@N` aliases in either form —
+        /// element handles expire with the DTX connection.
+        struct ExecutionResult: Codable {
+            let outline: String
+            let rows: [DeviceOutline.Row]
+            let elements: Int
+            let nodes: Int
+            let elapsedMs: Int
+        }
+
         func validate() throws {
             guard concurrency > 0 else { throw ValidationError("--concurrency must be greater than zero") }
             guard connections > 0 else { throw ValidationError("--connections must be greater than zero") }
         }
 
-        func run() async throws {
+        func execute() async throws -> ExecutionResult {
             let started = Date()
             let (outline, total) = try await DeviceSession.withClient(udid: device.udid, connections: connections) { client in
                 let elements = try await DeviceTreeFetcher(client: client, concurrency: concurrency, stopsAtLabelledNodes: fast).fetchTree()
                 return (DeviceOutline(elements: elements), elements.count)
             }
-            print(outline.rendered())
             let elapsed = Int(Date().timeIntervalSince(started) * 1000)
-            print("\n\(outline.rows.count) elements (\(total) nodes) in \(elapsed) ms")
+            return ExecutionResult(
+                outline: outline.rendered(),
+                rows: outline.rows,
+                elements: outline.rows.count,
+                nodes: total,
+                elapsedMs: elapsed
+            )
+        }
+
+        func format(_ result: ExecutionResult) -> CommandOutput {
+            .raw("\(result.outline)\n\n\(result.elements) elements (\(result.nodes) nodes) in \(result.elapsedMs) ms\n")
         }
     }
 
-    struct Screenshot: AsyncParsableCommand {
+    struct Screenshot: SimUseExecutableCommand {
         static let configuration = CommandConfiguration(
             commandName: "screenshot",
             abstract: "Capture a screenshot of the device display and save it as a PNG file.",
@@ -201,6 +267,14 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
 
         @Option(help: "Output PNG file path. Defaults to 'Device Screenshot - <device name> - <timestamp>.png' in the current directory.")
         var output: String?
+
+        @OptionGroup var json: JSONOutputOptions
+
+        var jsonOutput: Bool { json.enabled }
+
+        struct ExecutionResult: Codable {
+            let path: String
+        }
 
         /// Mirrors the simulator's default naming so paired screenshots from
         /// cross-platform sessions sort together. The device name is
@@ -252,18 +326,24 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
             }
         }
 
-        func run() async throws {
+        func execute() async throws -> ExecutionResult {
             let summary = try await DeviceSession.resolveDevice(udid: device.udid)
             let url = try Self.resolveOutputURL(output: output, deviceName: summary.name)
             try Self.captureAtomically(to: url) { temporary in
                 try Devicectl.run(arguments: Devicectl.screenshotArguments(deviceIdentifier: summary.udid, destination: temporary))
             }
-            print(url.path)
-            FileHandle.standardError.write(Data("Screenshot saved to \(url.path)\n".utf8))
+            return ExecutionResult(path: url.path)
+        }
+
+        func format(_ result: ExecutionResult) -> CommandOutput {
+            CommandOutput(
+                stdout: result.path + "\n",
+                stderr: "Screenshot saved to \(result.path)\n"
+            )
         }
     }
 
-    struct Tap: AsyncParsableCommand {
+    struct Tap: SimUseExecutableCommand {
         static let configuration = CommandConfiguration(
             commandName: "tap",
             abstract: "Activate an element by accessibility identifier or label.",
@@ -301,6 +381,22 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
         @Option(help: "Accessibility role used to disambiguate matches, for example Button.")
         var elementType: String?
 
+        @OptionGroup var json: JSONOutputOptions
+
+        var jsonOutput: Bool { json.enabled }
+
+        /// The matched element, in the vocabulary the outline renders
+        /// (role / label / trimmed-as-shown identifier). `action` names
+        /// the accessibility action sent — Activate is the only one
+        /// exposed today, but the key keeps the shape honest when more
+        /// (e.g. scroll, #104) arrive.
+        struct ExecutionResult: Codable {
+            let action: String
+            let role: String
+            let label: String
+            let identifier: String?
+        }
+
         /// Identifier from the positional `#id` alias or the `--id` option.
         private var resolvedIdentifier: String? {
             if let id { return id }
@@ -327,9 +423,9 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
             }
         }
 
-        func run() async throws {
+        func execute() async throws -> ExecutionResult {
             let identifier = resolvedIdentifier
-            let matched = try await DeviceSession.withClient(udid: device.udid) { client in
+            return try await DeviceSession.withClient(udid: device.udid) { client in
                 let elements = try await DeviceTreeFetcher(client: client).fetchTree()
                 let target = try DeviceTapTargetResolver.resolve(
                     elements,
@@ -339,9 +435,20 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
                     elementType: elementType
                 )
                 try await client.perform(.activate, on: target.element)
-                return DeviceTapTargetResolver.describe(target)
+                // Trimmed like the outline renders it, so the reported
+                // `identifier` is exactly what `tap '#<id>'` accepts.
+                let identifier = target.identifier?.trimmingCharacters(in: .whitespacesAndNewlines)
+                return ExecutionResult(
+                    action: "Activate",
+                    role: target.role,
+                    label: DeviceOutline.label(from: target.summary, role: target.role),
+                    identifier: identifier?.isEmpty == false ? identifier : nil
+                )
             }
-            print("Sent Activate to \(matched)")
+        }
+
+        func format(_ result: ExecutionResult) -> CommandOutput {
+            .line("Sent \(result.action) to \(DeviceTapTargetResolver.describe(role: result.role, label: result.label, identifier: result.identifier))")
         }
     }
 }
