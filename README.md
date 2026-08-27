@@ -146,7 +146,7 @@ sim-use drives both **iOS Simulators** and **Android devices / emulators** throu
 
 For Android, run `sim-use android init --device <serial>` once to install the bridge APK. See `AGENTS.md` for Android toolchain setup.
 
-**Development-signed apps on physical iPhones and iPads** are reachable under a separate, experimental `sim-use ios-device` surface. sim-use installs and signs no runner and needs no Developer Disk Image; the connected device must be unlocked and the foreground app must have `get-task-allow=true`. That channel exposes no element geometry, so it trades coordinate taps, swipes and gestures for accessibility actions. See [Physical iOS devices](#physical-ios-devices).
+**Development-signed apps on physical iPhones and iPads** are reachable under a separate, experimental `sim-use ios-device` surface. sim-use installs and signs no runner and needs no Developer Disk Image; the connected device must be unlocked and the foreground app must have `get-task-allow=true`. That channel exposes no element geometry, so it trades coordinate taps, swipes and gestures for accessibility actions. Attached physical devices do appear in the unified `sim-use devices` listing (kind `physical`). See [Physical iOS devices](#physical-ios-devices).
 
 
 ## Commands
@@ -162,8 +162,14 @@ Run `sim-use --help` or `sim-use <command> --help` for the full flag set.
 
 ```bash
 sim-use devices
+# PLATFORM  KIND       STATE   NAME               UDID                                  RUNTIME
+# ios       simulator  Booted  iPhone 17 Pro Max  B34FF305-5EA8-412B-943F-1D0371CA17FF  iOS 27.0
+# ios       physical   Booted  My iPhone          00008130-00066D2A10EB8D3A             iOS 26.6
+# android   emulator   device  Medium_Phone       emulator-5554                         Android
 UDID="B34FF305-5EA8-412B-943F-1D0371CA17FF"
 ```
+
+One listing covers every target: iOS Simulators (`simctl`), Android devices and emulators (`adb`), and USB-attached physical iPhones/iPads (`FBDeviceControl`). `KIND` — `simulator` / `emulator` / `physical` — is orthogonal to `PLATFORM` and also appears as `kind` in `--json`; capabilities follow the kind (see [Physical iOS devices](#physical-ios-devices) for what physical iOS supports).
 
 ### Touch & gestures
 
@@ -403,8 +409,8 @@ codesign -d --entitlements :- /path/to/MyApp.app
 ```
 
 ```bash
-sim-use ios-device devices
-# 00008140-000210603A40801C  My iPhone  iOS 27.0  Booted
+sim-use ios-device devices           # or `sim-use devices` — attached physical
+# 00008140-000210603A40801C  My iPhone  iOS 27.0  Booted     # devices appear there with kind `physical`
 
 sim-use ios-device ui --device 00008140-000210603A40801C
 # Button  "Chats Button, Selected"
@@ -431,7 +437,7 @@ sim-use ios-device screenshot
 sim-use ios-device screenshot --output shot.png
 ```
 
-A device is addressed by UDID or ECID, and `--device` is optional only when exactly one is attached. Run `ui` again after every action: accessibility actions are fire-and-forget, so the follow-up read is the authoritative verification.
+A device is addressed by UDID or ECID, and `--device` is optional only when exactly one is attached. A freshly attached device may be listed by ECID until a session has opened (AMDevice publishes the lockdown UDID lazily); both identifiers are accepted. Run `ui` again after every action: accessibility actions are fire-and-forget, so the follow-up read is the authoritative verification.
 
 Passing a physical device UDID to a top-level or `sim-use ios` verb fails fast with a pointer back to this surface — those verbs only drive iOS Simulators and Android devices.
 
