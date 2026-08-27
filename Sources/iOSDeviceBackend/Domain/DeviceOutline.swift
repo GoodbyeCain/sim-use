@@ -8,7 +8,10 @@ import Foundation
 /// carry that structure instead — which is the accessibility reading order, and
 /// is arguably a better ordering to hand an agent than y-coordinates.
 public struct DeviceOutline {
-    public struct Row {
+    /// Codable so `ui --json` can carry the outline structurally; the
+    /// synthesized coding omits `identifier` when absent, matching the
+    /// rendered form (no trailing `#`).
+    public struct Row: Codable, Equatable, Sendable {
         public let depth: Int
         public let role: String
         public let label: String
@@ -45,6 +48,12 @@ public struct DeviceOutline {
     }
 
     public func rendered() -> String {
+        Self.rendered(rows: rows)
+    }
+
+    /// Static so a decoded `ExecutionResult` can be re-rendered without
+    /// rebuilding the element tree.
+    public static func rendered(rows: [Row]) -> String {
         rows.map { row in
             let indent = String(repeating: "  ", count: min(row.depth, 8))
             let label = row.label.isEmpty ? "" : "\"\(row.label)\""

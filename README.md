@@ -421,7 +421,7 @@ sim-use ios-device ui --device 00008140-000210603A40801C
 
 sim-use ios-device tap --label "Friends" --element-type Button \
   --device 00008140-000210603A40801C
-# Sent Activate to Friends Button
+# Sent Activate to 'Friends' [Button]
 
 # Dynamic labels can use the regular substring selector vocabulary.
 sim-use ios-device tap --label-contains "Reply" --element-type Button
@@ -435,6 +435,10 @@ sim-use ios-device tap '#BackButton'
 sim-use ios-device screenshot
 # /Users/me/Device Screenshot - My iPhone - 2026-08-27 at 09.34.10.png
 sim-use ios-device screenshot --output shot.png
+
+# Every verb also takes --json (the shared {ok, data} envelope).
+sim-use ios-device tap '#BackButton' --json
+# {"ok":true,"data":{"action":"Activate","identifier":"BackButton","label":"sim-use Playground","role":"Button"}}
 ```
 
 A device is addressed by UDID or ECID, and `--device` is optional only when exactly one is attached. A freshly attached device may be listed by ECID until a session has opened (AMDevice publishes the lockdown UDID lazily); both identifiers are accepted. Run `ui` again after every action: accessibility actions are fire-and-forget, so the follow-up read is the authoritative verification.
@@ -446,14 +450,14 @@ This channel deliberately differs from the simulator backend:
   * **No element geometry.** There is no coordinate tap, `swipe`, `gesture` or `multi-touch`. Only the exposed `tap` accessibility action is currently supported; unsupported simulator verbs are not routed here.
   * **No `@N` aliases, but stable `#id`s.** Element handles encode a live pointer and expire with their DTX connection, so — like the missing geometry — the cross-invocation `@N` alias cannot be backed faithfully and the outline advertises none. The stable accessibility identifier *can*: the outline shows each element's `#id`, and `tap` accepts it as a positional `#<id>` or `--id` (mirroring the simulator), alongside `--label` / `--label-contains` / `--element-type`. Prefer the `#id` when a label is dynamic — a navigation-bar back button is labelled with the previous screen's title but keeps `#BackButton`, and is an ordinary, tappable row in the outline.
   * **Screenshots go over CoreDevice, not the audit daemon.** `screenshot` shells out to `xcrun devicectl device capture screenshot`, a separate channel with different rules: it is not limited to development-signed foreground apps and captures whatever is on screen, SpringBoard and system apps included. Screen *recording* exists on the same channel (`devicectl device capture screen-record`) but is capability-gated per device (CoreDevice can report "Screen Recording is not supported by this device") and is not exposed yet.
-  * **Text output only.** The experimental `ios-device` commands do not yet support `--json` or recording.
+  * **No recording yet.** Screen recording is not exposed (see the CoreDevice capability gate above). `--json` *is* supported on every `ios-device` verb, with the same `{ok, data}` envelope as the rest of the CLI: `devices` returns unified device rows (the `deviceId` / `kind` / `runtime` schema of top-level `sim-use devices --json`), `ui` returns the outline text plus structured rows (`depth` / `role` / `label` / `#identifier`) with element/node counts and timing, `tap` returns the matched element, and `screenshot` returns the saved path. Errors carry a machine-readable `hint` alongside the message.
   * **Slower snapshots.** A full tree costs a few seconds. `ui --fast` stops at labelled elements and is roughly 40% quicker, at the cost of about a quarter of the elements.
   * **Reading order, not screen order.** With no frames to sort by, the outline follows accessibility nesting and reading order.
 
 
 ## Architecture
 
-sim-use drives iOS Simulators through the lower-level XCFrameworks of Facebook's [idb](https://github.com/facebook/idb) (statically linked), Apple's Accessibility APIs, and the simulator HID pipeline. Android devices are driven through an on-device bridge APK that exposes the AccessibilityService tree and input injection over HTTP, tunnelled via `adb forward`. Physical iOS devices go through a third path: idb's `FBDeviceControl` opens a lockdown service connection, over which sim-use speaks Apple's DTX message protocol to the accessibility audit daemon (screen capture instead shells out to Xcode's `devicectl`). Everything ships as a single binary. The established simulator and Android surfaces support `--json`; the experimental `ios-device` commands currently emit text only.
+sim-use drives iOS Simulators through the lower-level XCFrameworks of Facebook's [idb](https://github.com/facebook/idb) (statically linked), Apple's Accessibility APIs, and the simulator HID pipeline. Android devices are driven through an on-device bridge APK that exposes the AccessibilityService tree and input injection over HTTP, tunnelled via `adb forward`. Physical iOS devices go through a third path: idb's `FBDeviceControl` opens a lockdown service connection, over which sim-use speaks Apple's DTX message protocol to the accessibility audit daemon (screen capture instead shells out to Xcode's `devicectl`). Everything ships as a single binary, and every surface — simulator, Android and physical iOS — supports `--json` with the shared `{ok, data}` envelope.
 
 
 ## Viewer
