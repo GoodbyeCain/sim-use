@@ -81,10 +81,14 @@ public struct IOSSimScreenshotCommand: SimUseExecutableCommand {
     /// file URL using iOS naming conventions. Public so tests can
     /// pin the path expansion behaviour without spinning up an
     /// FBSimulator. Path semantics live in `OutputFilePath`, shared
-    /// with the video verbs and the physical-device screenshot.
+    /// with the video verbs and the physical-device screenshot. The
+    /// simulator name is user-editable free text (simctl accepts any
+    /// name), so it is collapsed into a single safe path component —
+    /// "My iPhone/Work" must not turn the default output into a
+    /// directory hierarchy.
     public static func prepareOutputURL(output: String?, simulatorName: String) throws -> URL {
         let url = OutputFilePath.resolve(output: output) {
-            "Simulator Screenshot - \(simulatorName) - \(formatTimestamp(Date())).png"
+            "Simulator Screenshot - \(OutputFilePath.safeFilenameComponent(simulatorName)) - \(formatTimestamp(Date())).png"
         }
         try OutputFilePath.prepare(url)
         return url
