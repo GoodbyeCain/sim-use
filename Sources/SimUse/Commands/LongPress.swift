@@ -78,7 +78,7 @@ struct LongPress: SimUseExecutableCommand {
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve()
+        try device.resolve(allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
@@ -102,13 +102,24 @@ struct LongPress: SimUseExecutableCommand {
         switch PlatformRouter.resolve(udid: device.resolved) {
         case .android:
             return try executeAndroid()
+        case .iOSDevice:
+            throw TargetCapabilityError.physicalIOS(
+                verb: "long-press",
+                reason: "the audit channel's only exposed action is Activate — there is no coordinate input or press-duration control.",
+                alternative: "Use `sim-use tap '#<id>' / --label` for a plain activation; long-press gestures are not available on physical iOS devices."
+            )
         case .iOSSim, .none:
             return try await executeIOSSim()
         }
     }
 
     func format(_ result: ExecutionResult) -> CommandOutput {
-        .line("✓ Long-press at (\(result.x), \(result.y)) completed successfully")
+        // x/y are always present here — long-press rejects physical iOS
+        // (the only coordinate-less producer) in its platform switch.
+        guard let x = result.x, let y = result.y else {
+            return .line(result.summaryLine)
+        }
+        return .line("✓ Long-press at (\(x), \(y)) completed successfully")
     }
 
     /// iOS path: hand off to the tap executor with `--duration` carried

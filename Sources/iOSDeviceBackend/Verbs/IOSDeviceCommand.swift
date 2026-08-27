@@ -190,8 +190,8 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
         }
     }
 
-    struct UI: SimUseExecutableCommand {
-        static let configuration = CommandConfiguration(
+    public struct UI: SimUseExecutableCommand {
+        public static let configuration = CommandConfiguration(
             commandName: "ui",
             abstract: "Print an outline of the foreground app's accessibility tree."
         )
@@ -209,29 +209,45 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
 
         @OptionGroup var json: JSONOutputOptions
 
-        var jsonOutput: Bool { json.enabled }
+        public var jsonOutput: Bool { json.enabled }
+
+        public init() {}
 
         /// `rows` is the structured outline; `outline` is the same rows
         /// rendered as the text the default mode prints, mirroring the
         /// simulator envelope where agents read `data.outline` directly.
         /// There are deliberately no `@N` aliases in either form —
         /// element handles expire with the DTX connection.
-        struct ExecutionResult: Codable {
-            let outline: String
-            let rows: [DeviceOutline.Row]
-            let elements: Int
-            let nodes: Int
-            let elapsedMs: Int
+        public struct ExecutionResult: Codable {
+            public let outline: String
+            public let rows: [DeviceOutline.Row]
+            public let elements: Int
+            public let nodes: Int
+            public let elapsedMs: Int
         }
 
-        func validate() throws {
+        public func validate() throws {
             guard concurrency > 0 else { throw ValidationError("--concurrency must be greater than zero") }
             guard connections > 0 else { throw ValidationError("--connections must be greater than zero") }
         }
 
-        func execute() async throws -> ExecutionResult {
+        public func execute() async throws -> ExecutionResult {
+            try await Self.performUI(udid: device.udid, concurrency: concurrency, connections: connections, fast: fast)
+        }
+
+        /// Typed executor entry point shared with the top-level
+        /// `describe-ui` forwarder (mirroring
+        /// `IOSSimTapCommand.performTap`) — parsed values are handed
+        /// over directly, so no backend command instance is hand-built
+        /// and there is no per-field copy to forget (#42).
+        public static func performUI(
+            udid: String?,
+            concurrency: Int = DeviceTreeFetcher.defaultConcurrency,
+            connections: Int = 1,
+            fast: Bool = false
+        ) async throws -> ExecutionResult {
             let started = Date()
-            let (outline, total) = try await DeviceSession.withClient(udid: device.udid, connections: connections) { client in
+            let (outline, total) = try await DeviceSession.withClient(udid: udid, connections: connections) { client in
                 let elements = try await DeviceTreeFetcher(client: client, concurrency: concurrency, stopsAtLabelledNodes: fast).fetchTree()
                 return (DeviceOutline(elements: elements), elements.count)
             }
@@ -245,13 +261,20 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
             )
         }
 
-        func format(_ result: ExecutionResult) -> CommandOutput {
-            .raw("\(result.outline)\n\n\(result.elements) elements (\(result.nodes) nodes) in \(result.elapsedMs) ms\n")
+        public func format(_ result: ExecutionResult) -> CommandOutput {
+            .raw(Self.renderedText(result))
+        }
+
+        /// The full text block default mode prints (outline + summary
+        /// line). Shared with the top-level `describe-ui` forwarder so
+        /// the routed surface stays byte-identical to this namespace.
+        public static func renderedText(_ result: ExecutionResult) -> String {
+            "\(result.outline)\n\n\(result.elements) elements (\(result.nodes) nodes) in \(result.elapsedMs) ms\n"
         }
     }
 
-    struct Screenshot: SimUseExecutableCommand {
-        static let configuration = CommandConfiguration(
+    public struct Screenshot: SimUseExecutableCommand {
+        public static let configuration = CommandConfiguration(
             commandName: "screenshot",
             abstract: "Capture a screenshot of the device display and save it as a PNG file.",
             discussion: """
@@ -270,10 +293,12 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
 
         @OptionGroup var json: JSONOutputOptions
 
-        var jsonOutput: Bool { json.enabled }
+        public var jsonOutput: Bool { json.enabled }
 
-        struct ExecutionResult: Codable {
-            let path: String
+        public init() {}
+
+        public struct ExecutionResult: Codable {
+            public let path: String
         }
 
         /// Mirrors the simulator's default naming so paired screenshots from
@@ -326,16 +351,23 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
             }
         }
 
-        func execute() async throws -> ExecutionResult {
-            let summary = try await DeviceSession.resolveDevice(udid: device.udid)
-            let url = try Self.resolveOutputURL(output: output, deviceName: summary.name)
-            try Self.captureAtomically(to: url) { temporary in
+        public func execute() async throws -> ExecutionResult {
+            try await Self.performScreenshot(udid: device.udid, output: output)
+        }
+
+        /// Typed executor entry point shared with the top-level
+        /// `screenshot` forwarder — parsed values are handed over
+        /// directly, so no backend command instance is hand-built (#42).
+        public static func performScreenshot(udid: String?, output: String?) async throws -> ExecutionResult {
+            let summary = try await DeviceSession.resolveDevice(udid: udid)
+            let url = try resolveOutputURL(output: output, deviceName: summary.name)
+            try captureAtomically(to: url) { temporary in
                 try Devicectl.run(arguments: Devicectl.screenshotArguments(deviceIdentifier: summary.udid, destination: temporary))
             }
             return ExecutionResult(path: url.path)
         }
 
-        func format(_ result: ExecutionResult) -> CommandOutput {
+        public func format(_ result: ExecutionResult) -> CommandOutput {
             CommandOutput(
                 stdout: result.path + "\n",
                 stderr: "Screenshot saved to \(result.path)\n"
@@ -343,8 +375,8 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
         }
     }
 
-    struct Tap: SimUseExecutableCommand {
-        static let configuration = CommandConfiguration(
+    public struct Tap: SimUseExecutableCommand {
+        public static let configuration = CommandConfiguration(
             commandName: "tap",
             abstract: "Activate an element by accessibility identifier or label.",
             discussion: """
@@ -383,18 +415,20 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
 
         @OptionGroup var json: JSONOutputOptions
 
-        var jsonOutput: Bool { json.enabled }
+        public var jsonOutput: Bool { json.enabled }
+
+        public init() {}
 
         /// The matched element, in the vocabulary the outline renders
         /// (role / label / trimmed-as-shown identifier). `action` names
         /// the accessibility action sent — Activate is the only one
         /// exposed today, but the key keeps the shape honest when more
         /// (e.g. scroll, #104) arrive.
-        struct ExecutionResult: Codable {
-            let action: String
-            let role: String
-            let label: String
-            let identifier: String?
+        public struct ExecutionResult: Codable {
+            public let action: String
+            public let role: String
+            public let label: String
+            public let identifier: String?
         }
 
         /// Identifier from the positional `#id` alias or the `--id` option.
@@ -404,7 +438,7 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
             return alias.hasPrefix("#") ? String(alias.dropFirst()) : alias
         }
 
-        func validate() throws {
+        public func validate() throws {
             if alias != nil, id != nil {
                 throw ValidationError("specify the identifier once — either the positional `#id` or --id, not both")
             }
@@ -423,9 +457,29 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
             }
         }
 
-        func execute() async throws -> ExecutionResult {
-            let identifier = resolvedIdentifier
-            return try await DeviceSession.withClient(udid: device.udid) { client in
+        public func execute() async throws -> ExecutionResult {
+            try await Self.performTap(
+                udid: device.udid,
+                identifier: resolvedIdentifier,
+                label: label,
+                labelContains: labelContains,
+                elementType: elementType
+            )
+        }
+
+        /// Typed executor entry point shared with the top-level `tap`
+        /// forwarder — parsed values are handed over directly, so no
+        /// backend command instance is hand-built (#42). Expects exactly
+        /// one of `identifier` / `label` / `labelContains` (the resolver
+        /// rejects other combinations).
+        public static func performTap(
+            udid: String?,
+            identifier: String?,
+            label: String?,
+            labelContains: String?,
+            elementType: String?
+        ) async throws -> ExecutionResult {
+            try await DeviceSession.withClient(udid: udid) { client in
                 let elements = try await DeviceTreeFetcher(client: client).fetchTree()
                 let target = try DeviceTapTargetResolver.resolve(
                     elements,
@@ -437,18 +491,25 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
                 try await client.perform(.activate, on: target.element)
                 // Trimmed like the outline renders it, so the reported
                 // `identifier` is exactly what `tap '#<id>'` accepts.
-                let identifier = target.identifier?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let matchedId = target.identifier?.trimmingCharacters(in: .whitespacesAndNewlines)
                 return ExecutionResult(
                     action: "Activate",
                     role: target.role,
                     label: DeviceOutline.label(from: target.summary, role: target.role),
-                    identifier: identifier?.isEmpty == false ? identifier : nil
+                    identifier: matchedId?.isEmpty == false ? matchedId : nil
                 )
             }
         }
 
-        func format(_ result: ExecutionResult) -> CommandOutput {
-            .line("Sent \(result.action) to \(DeviceTapTargetResolver.describe(role: result.role, label: result.label, identifier: result.identifier))")
+        public func format(_ result: ExecutionResult) -> CommandOutput {
+            .line(Self.summaryLine(result))
+        }
+
+        /// The success line default mode prints. Shared with the
+        /// top-level `tap` forwarder so the routed surface stays
+        /// byte-identical to this namespace.
+        public static func summaryLine(_ result: ExecutionResult) -> String {
+            "Sent \(result.action) to \(DeviceTapTargetResolver.describe(role: result.role, label: result.label, identifier: result.identifier))"
         }
     }
 }

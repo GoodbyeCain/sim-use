@@ -29,11 +29,14 @@ struct ViewerAPIHandlers {
 
     func devices(_ request: HTTPRequest) async -> HTTPResponse {
         do {
-            // `--no-physical-ios`: the Viewer drives devices through the
-            // top-level verbs, which don't accept physical iOS targets —
-            // exclude them at the source (also skipping the ~1 s
-            // FBDeviceControl discovery) instead of advertising rows the
-            // SPA cannot operate.
+            // `--no-physical-ios`: a deliberate product limitation. The
+            // top-level verbs do route physical iOS targets (#115), but
+            // only the accessibility subset (ui / selector tap /
+            // screenshot) — the SPA is built on coordinate taps, frames
+            // and video streaming, none of which that channel carries.
+            // Exclude the rows at the source (also skipping the ~1 s
+            // FBDeviceControl discovery) instead of advertising devices
+            // the Viewer cannot meaningfully operate.
             let result = try await run(arguments: ["devices", "--json", "--no-physical-ios"])
             let envelope = parseEnvelope(result.stdout)
             if let failure = failureResponse(envelope: envelope, result: result) {

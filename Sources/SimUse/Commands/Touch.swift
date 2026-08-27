@@ -68,7 +68,7 @@ struct Touch: SimUseExecutableCommand {
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve()
+        try device.resolve(allowPhysical: true)
         if PlatformRouter.looksLikeAndroid(device.resolved) {
             try rejectAndroidSplitForm()
         }
@@ -100,6 +100,12 @@ struct Touch: SimUseExecutableCommand {
         switch PlatformRouter.resolve(udid: device.resolved) {
         case .android:
             return try executeAndroid()
+        case .iOSDevice:
+            throw TargetCapabilityError.physicalIOS(
+                verb: "touch",
+                reason: "touch down/up events are coordinate HID, and the accessibility audit channel exposes no coordinate input.",
+                alternative: "Interact through accessibility actions instead: `sim-use ui` reads the outline, then `sim-use tap '#<id>' / --label` activates an element."
+            )
         case .iOSSim, .none:
             return try await executeIOSSim()
         }

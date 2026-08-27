@@ -105,6 +105,13 @@ struct DeviceOptionsResolveTests {
         }
     }
 
+    @Test("allowPhysical lets a physical UDID through for the routing verbs")
+    func physicalDeviceAllowedWhenOptedIn() throws {
+        var probe = try ProbeCommand.parse(["--device", "00008130-00066D2A10EB8D3A"])
+        try probe.device.resolve(allowPhysical: true)
+        #expect(probe.device.resolved == "00008130-00066D2A10EB8D3A")
+    }
+
     @Test("Android-shape value bypasses DeviceResolver entirely")
     func androidShapeBypasses() throws {
         // `emulator-5554` matches PlatformRouter.looksLikeAndroid; the

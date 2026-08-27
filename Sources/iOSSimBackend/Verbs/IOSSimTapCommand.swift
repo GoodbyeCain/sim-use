@@ -61,8 +61,20 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
     }
 
     public struct ExecutionResult: Codable, CommandAdvisoryProviding {
-        public let x: Double
-        public let y: Double
+        /// Dispatch coordinates. Present on simulator and Android
+        /// results; nil on physical-iOS results — the audit channel has
+        /// no geometry, so a routed physical tap reports the matched
+        /// element instead (the four fields below, nil here otherwise).
+        public let x: Double?
+        public let y: Double?
+        public let action: String?
+        public let role: String?
+        public let label: String?
+        public let identifier: String?
+        /// "physical" on physical-iOS results; absent otherwise.
+        /// Additive key so agents can detect the degraded shape without
+        /// probing for missing coordinates.
+        public let kind: String?
         /// Excluded from the encoded `data` payload via `CodingKeys`
         /// (the default value keeps decode synthesis working) — the
         /// envelope hoists it to the top-level `advisory` key. See
@@ -72,12 +84,47 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
         public init(x: Double, y: Double, commandAdvisory: CommandAdvisory? = nil) {
             self.x = x
             self.y = y
+            self.action = nil
+            self.role = nil
+            self.label = nil
+            self.identifier = nil
+            self.kind = nil
             self.commandAdvisory = commandAdvisory
+        }
+
+        /// Physical-iOS shape: the accessibility action sent and the
+        /// element it resolved to, in the `ios-device tap` vocabulary.
+        public init(action: String, role: String, label: String, identifier: String?) {
+            self.x = nil
+            self.y = nil
+            self.action = action
+            self.role = role
+            self.label = label
+            self.identifier = identifier
+            self.kind = "physical"
+        }
+
+        /// Success line shared by every tap `format(_:)` site, so the
+        /// coordinate and matched-element renderings cannot drift
+        /// between the top-level forwarder and the namespaces. The
+        /// element form matches `IOSDeviceCommand.Tap.summaryLine`
+        /// byte-for-byte (pinned by test).
+        public var summaryLine: String {
+            if let x, let y {
+                return "✓ Tap at (\(x), \(y)) completed successfully"
+            }
+            let id = identifier.map { " #\($0)" } ?? ""
+            return "Sent \(action ?? "Activate") to '\(label ?? "")' [\(role ?? "")]\(id)"
         }
 
         private enum CodingKeys: String, CodingKey {
             case x
             case y
+            case action
+            case role
+            case label
+            case identifier
+            case kind
         }
     }
 
@@ -319,7 +366,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
     }
 
     public func format(_ result: ExecutionResult) -> CommandOutput {
-        .line("✓ Tap at (\(result.x), \(result.y)) completed successfully")
+        .line(result.summaryLine)
     }
 
     /// The `@N` cache was written by a `describe-ui` run whose screen

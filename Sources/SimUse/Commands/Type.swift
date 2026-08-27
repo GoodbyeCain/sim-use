@@ -61,7 +61,7 @@ struct Type: SimUseExecutableCommand {
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve()
+        try device.resolve(allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
@@ -80,6 +80,12 @@ struct Type: SimUseExecutableCommand {
         switch PlatformRouter.resolve(udid: device.resolved) {
         case .android:
             return try executeAndroid()
+        case .iOSDevice:
+            throw TargetCapabilityError.physicalIOS(
+                verb: "type",
+                reason: "the accessibility audit channel exposes no keyboard or text-input access.",
+                alternative: "Text input on physical iOS devices is not available yet. If the step only needs an activation, use `sim-use tap '#<id>' / --label`."
+            )
         case .iOSSim, .none:
             return try await executeIOSSim()
         }

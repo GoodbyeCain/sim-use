@@ -17,7 +17,7 @@ This verifies sim-use is installed, the device is reachable, and the daemon is h
 2. `sim-use devices` — confirm the target device is listed and booted/connected.
 3. `sim-use ui --device <UDID>` — confirm you can read the screen.
 
-`--device` is optional when only one simulator is booted or one daemon is running. For Android, run `sim-use android init --device <serial>` once to install the bridge APK. Attached physical iPhones/iPads appear in `sim-use devices` with kind `physical`, but their verbs use the separate experimental surface shown below; do not route them through these top-level commands.
+`--device` is optional when only one simulator is booted or one daemon is running. For Android, run `sim-use android init --device <serial>` once to install the bridge APK. Attached physical iPhones/iPads appear in `sim-use devices` with kind `physical` and route through the top-level verbs too — but only `ui`, selector-based `tap` and `screenshot`; every other verb rejects on that target. See *Physical iOS devices* below before driving one.
 
 ## 1. The observe-act loop
 
@@ -86,37 +86,36 @@ Every byte of command output you read costs context. Defaults that keep the loop
 
 ### Physical iOS devices (experimental)
 
-Use the separate `sim-use ios-device` surface. Never route a physical iPhone or iPad through the top-level or `sim-use ios` verbs.
+The top-level verbs route a physical UDID automatically, but only three of them: `ui`, `tap` (`#<id>` / `--id` / `--label` / `--label-contains` / `--element-type` forms) and `screenshot`. **Never assume capability parity with the simulator** — every other verb or form (coordinates, `@N`/`#N` aliases, swipe/gesture/multi-touch, type/paste, recording, `--value`/`--label-regex`/`--frame`/`--duration`/`--wait-timeout`) rejects with the reason and the nearest alternative in the `hint`; read it instead of retrying. The `sim-use ios-device` namespace is the physical-only peer of `ios`/`android` (same verbs, plus ECID addressing and tree-tuning flags).
 
 **Hard requirement for `ui` / `tap`:** the device must be paired, trusted, unlocked and in Developer Mode, and the foreground target app must be development-signed with `get-task-allow=true`. A Release-configuration binary installed with a Development profile is supported. Distribution/Ad Hoc, TestFlight, App Store and system apps are unsupported; do not retry them or claim success. sim-use itself installs and signs no runner and needs no Developer Disk Image. `screenshot` is exempt from the signing rule — it runs over CoreDevice and captures any screen, system apps included.
 
 ```bash
-# Physical-device preflight
-sim-use ios-device devices
-sim-use ios-device ui --device <UDID>
+# Physical-device preflight — physical rows carry kind `physical`
+sim-use devices
 
-# Observe → act → verify
-sim-use ios-device ui --device <UDID>
-sim-use ios-device tap --label "Friends" --element-type Button --device <UDID>
-sim-use ios-device ui --device <UDID>
+# Observe → act → verify, same loop and verbs as the simulator
+sim-use ui --device <UDID>
+sim-use tap --label "Friends" --element-type Button --device <UDID>
+sim-use ui --device <UDID>
 
 # For dynamic labels
-sim-use ios-device tap --label-contains "Reply" --element-type Button --device <UDID>
+sim-use tap --label-contains "Reply" --element-type Button --device <UDID>
 
-# By stable identifier (the #id shown in ui) — positional or --id, like the simulator
-sim-use ios-device tap '#BackButton' --device <UDID>
+# By stable identifier (the #id shown in ui) — positional or --id
+sim-use tap '#BackButton' --device <UDID>
 
 # Screenshot — any screen, not limited to development-signed apps
-sim-use ios-device screenshot --output shot.png --device <UDID>
+sim-use screenshot --output shot.png --device <UDID>
 ```
 
 Rules for this experimental surface:
 
 1. **Treat hierarchy errors as capability failures.** If the command says the hierarchy is unavailable, confirm the screen is unlocked and inspect the installed app's final `get-task-allow` entitlement. Do not fall back to coordinates or focus walking.
 2. **Tap by `#id` or label, not `@N`.** Element handles expire with the DTX connection, so there is no `@N` alias (nor coordinates — no geometry). Use the `#id` shown in the outline (positional `#<id>` or `--id`) — it is stable and the best choice when a label is dynamic — or `--label` / `--label-contains`, with `--element-type` to disambiguate. The navigation-bar back button appears as a normal `Button "<previous screen title>" #BackButton`; go back by tapping `#BackButton` (or the shown label) like any other element — no special "back" verb.
-3. **Always verify.** Activate is fire-and-forget. Re-run `sim-use ios-device ui` and confirm the expected state before continuing.
-4. **No geometry or simulator-only verbs.** Coordinate tap, swipe, gesture, multi-touch, type and recording are unavailable here. Do not substitute a similarly named top-level command. `screenshot` *is* available and works on any screen (it captures over CoreDevice, not the accessibility channel), and every `ios-device` verb takes `--json` with the standard `{ok, data}` envelope (errors include a `hint`).
-5. **Budget seconds, not milliseconds.** A full tree takes a few seconds. `ui --fast` is quicker but omits nested elements; do not poll in a tight loop.
+3. **Always verify.** Activate is fire-and-forget. Re-run `sim-use ui` and confirm the expected state before continuing.
+4. **Respect the capability rejections.** A `not supported on physical iOS devices` error is a statement about the channel, not a transient failure — follow its hint (usually `ui` + `tap '#<id>' / --label`) instead of retrying or substituting a lookalike form. `--json` works on every verb with the standard `{ok, data}` envelope; physical results carry `"kind":"physical"` and omit geometry fields (`screen`, `x`/`y`).
+5. **Budget seconds, not milliseconds.** A full tree takes a few seconds. `sim-use ios-device ui --fast` is quicker but omits nested elements; do not poll in a tight loop.
 
 If `ui` succeeds with zero elements or `tap` prints success for a missing/ambiguous label, treat it as a sim-use bug; the command is expected to fail loudly instead.
 
