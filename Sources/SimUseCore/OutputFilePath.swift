@@ -51,16 +51,25 @@ public enum OutputFilePath {
         return baseURL
     }
 
-    /// Destructive preparation of a resolved output URL: create missing
-    /// parent directories and remove an existing file at the target so the
-    /// subsequent write replaces it.
-    public static func prepare(_ url: URL) throws {
+    /// Create the resolved URL's missing parent directories. Non-destructive;
+    /// safe to run before a capture that may still fail.
+    public static func createParentDirectory(for url: URL) throws {
         let fileManager = FileManager.default
-
         let directoryURL = url.deletingLastPathComponent()
         if !fileManager.fileExists(atPath: directoryURL.path) {
             try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true, attributes: nil)
         }
+    }
+
+    /// Destructive preparation of a resolved output URL: create missing
+    /// parent directories and remove an existing file at the target so the
+    /// subsequent write replaces it. Callers whose payload production can
+    /// still fail after this point should instead write to a temporary
+    /// sibling and replace on success, so a failed capture cannot destroy
+    /// the existing file.
+    public static func prepare(_ url: URL) throws {
+        let fileManager = FileManager.default
+        try createParentDirectory(for: url)
 
         var isDirectory: ObjCBool = false
         if fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) {

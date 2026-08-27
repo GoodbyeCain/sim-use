@@ -357,17 +357,67 @@ struct IOSDeviceBackendTests {
         #expect(try Data(contentsOf: existing) == precious)
     }
 
-    @Test("an accepted PNG output path removes the existing file so the write replaces it")
-    func acceptedOutputReplacesExistingFile() throws {
+    @Test("an accepted PNG output path defers deletion — the existing file survives resolution")
+    func acceptedOutputLeavesExistingFileUntilCapture() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let existing = dir.appendingPathComponent("shot.png")
-        try Data("stale".utf8).write(to: existing)
+        let stale = Data("stale".utf8)
+        try stale.write(to: existing)
 
         let url = try IOSDeviceCommand.Screenshot.resolveOutputURL(output: existing.path, deviceName: "iPhone One")
         #expect(url == existing)
-        #expect(!FileManager.default.fileExists(atPath: existing.path))
+        #expect(try Data(contentsOf: existing) == stale)
+    }
+
+    @Test("a failed capture leaves the existing screenshot intact and no temporary behind")
+    func failedCapturePreservesExistingFile() throws {
+        struct CaptureFailed: Error {}
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let target = dir.appendingPathComponent("important.png")
+        let precious = Data("precious".utf8)
+        try precious.write(to: target)
+
+        #expect(throws: CaptureFailed.self) {
+            try IOSDeviceCommand.Screenshot.captureAtomically(to: target) { temporary in
+                try Data("partial".utf8).write(to: temporary)
+                throw CaptureFailed()
+            }
+        }
+        #expect(try Data(contentsOf: target) == precious)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path) == ["important.png"])
+    }
+
+    @Test("a successful capture atomically replaces the existing screenshot")
+    func successfulCaptureReplacesExistingFile() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let target = dir.appendingPathComponent("shot.png")
+        try Data("stale".utf8).write(to: target)
+
+        try IOSDeviceCommand.Screenshot.captureAtomically(to: target) { temporary in
+            try Data("fresh".utf8).write(to: temporary)
+        }
+        #expect(try Data(contentsOf: target) == Data("fresh".utf8))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path) == ["shot.png"])
+    }
+
+    @Test("a successful capture creates the target when none exists")
+    func successfulCaptureCreatesFreshFile() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let target = dir.appendingPathComponent("shot.png")
+
+        try IOSDeviceCommand.Screenshot.captureAtomically(to: target) { temporary in
+            try Data("fresh".utf8).write(to: temporary)
+        }
+        #expect(try Data(contentsOf: target) == Data("fresh".utf8))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path) == ["shot.png"])
     }
 
     @Test("device selection errors tell the user how to recover")

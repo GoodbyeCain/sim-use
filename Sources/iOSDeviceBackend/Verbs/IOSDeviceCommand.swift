@@ -209,8 +209,9 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
             "Device Screenshot - \(deviceName) - \(OutputFilePath.screenshotTimestamp(date)).png"
         }
 
-        /// Resolve, validate, then prepare — in that order, so a rejected
-        /// non-PNG path never removes an existing file at the target.
+        /// Resolve, validate the extension, then ensure the parent directory
+        /// exists — nothing here removes an existing file, so neither a
+        /// rejected path nor a later capture failure can destroy one.
         /// Static so tests can pin that guarantee without a device.
         static func resolveOutputURL(output: String?, deviceName: String) throws -> URL {
             let url = OutputFilePath.resolve(output: output) {
@@ -219,14 +220,38 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
             guard url.pathExtension.lowercased() == "png" else {
                 throw CLIError(errorDescription: "devicectl writes PNG only — use an output path ending in .png (got '\(url.lastPathComponent)')")
             }
-            try OutputFilePath.prepare(url)
+            try OutputFilePath.createParentDirectory(for: url)
             return url
+        }
+
+        /// Captures into a temporary sibling file and moves it over the final
+        /// target only on success, so a capture that fails mid-flight (device
+        /// unplugged, devicectl timeout) leaves an existing file at --output
+        /// untouched. The temporary name keeps the .png suffix devicectl
+        /// requires. Injectable capture so tests can pin the failure branch.
+        static func captureAtomically(to url: URL, capture: (URL) throws -> Void) throws {
+            let fileManager = FileManager.default
+            let temporary = url.deletingLastPathComponent()
+                .appendingPathComponent(".\(url.lastPathComponent).partial-\(UUID().uuidString).png")
+            do {
+                try capture(temporary)
+                if fileManager.fileExists(atPath: url.path) {
+                    _ = try fileManager.replaceItemAt(url, withItemAt: temporary)
+                } else {
+                    try fileManager.moveItem(at: temporary, to: url)
+                }
+            } catch {
+                try? fileManager.removeItem(at: temporary)
+                throw error
+            }
         }
 
         func run() async throws {
             let summary = try await DeviceSession.resolveDevice(udid: device.udid)
             let url = try Self.resolveOutputURL(output: output, deviceName: summary.name)
-            try Devicectl.run(arguments: Devicectl.screenshotArguments(deviceIdentifier: summary.udid, destination: url))
+            try Self.captureAtomically(to: url) { temporary in
+                try Devicectl.run(arguments: Devicectl.screenshotArguments(deviceIdentifier: summary.udid, destination: temporary))
+            }
             print(url.path)
             FileHandle.standardError.write(Data("Screenshot saved to \(url.path)\n".utf8))
         }
