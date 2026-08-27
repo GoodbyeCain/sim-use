@@ -118,9 +118,10 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
 
         Element geometry is not available on this channel, so there is no
         coordinate tap, swipe or gesture here; interaction goes through
-        accessibility actions instead.
+        accessibility actions instead. The display itself can still be
+        captured with `screenshot`.
         """,
-        subcommands: [Devices.self, UI.self, Tap.self]
+        subcommands: [Devices.self, UI.self, Screenshot.self, Tap.self]
     )
 
     public init() {}
@@ -183,6 +184,85 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
         }
     }
 
+    struct Screenshot: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "screenshot",
+            abstract: "Capture a screenshot of the device display and save it as a PNG file.",
+            discussion: """
+            Captures over CoreDevice (`xcrun devicectl device capture
+            screenshot`) rather than the accessibility audit channel, so it
+            is not limited to development-signed foreground apps: whatever is
+            on screen is captured, SpringBoard and system apps included. The
+            device is selected exactly like the other ios-device verbs.
+            """
+        )
+
+        @OptionGroup var device: DeviceOptions
+
+        @Option(help: "Output PNG file path. Defaults to 'Device Screenshot - <device name> - <timestamp>.png' in the current directory.")
+        var output: String?
+
+        /// Mirrors the simulator's default naming so paired screenshots from
+        /// cross-platform sessions sort together. The device name is
+        /// user-editable free text, so it is collapsed into a single safe
+        /// path component first — "My iPhone/Work" must not create a
+        /// directory hierarchy. Static so tests can pin the convention
+        /// without a device.
+        static func defaultFilename(deviceName: String, at date: Date) -> String {
+            "Device Screenshot - \(OutputFilePath.safeFilenameComponent(deviceName)) - \(OutputFilePath.screenshotTimestamp(date)).png"
+        }
+
+        /// Resolve, validate the extension, then ensure the parent directory
+        /// exists — nothing here removes an existing file, so neither a
+        /// rejected path nor a later capture failure can destroy one.
+        /// Static so tests can pin that guarantee without a device.
+        static func resolveOutputURL(output: String?, deviceName: String) throws -> URL {
+            let url = OutputFilePath.resolve(output: output) {
+                defaultFilename(deviceName: deviceName, at: Date())
+            }
+            guard url.pathExtension.lowercased() == "png" else {
+                throw CLIError(errorDescription: "devicectl writes PNG only — use an output path ending in .png (got '\(url.lastPathComponent)')")
+            }
+            try OutputFilePath.createParentDirectory(for: url)
+            return url
+        }
+
+        /// Captures into a temporary sibling file and moves it over the final
+        /// target only on success, so a capture that fails mid-flight (device
+        /// unplugged, devicectl timeout) leaves an existing file at --output
+        /// untouched. The temporary basename is fixed and short — deriving it
+        /// from the target name would push a NAME_MAX-length (255-byte)
+        /// target over the per-component limit — and keeps the .png suffix
+        /// devicectl requires. Injectable capture so tests can pin the
+        /// failure branch.
+        static func captureAtomically(to url: URL, capture: (URL) throws -> Void) throws {
+            let fileManager = FileManager.default
+            let temporary = url.deletingLastPathComponent()
+                .appendingPathComponent(".sim-use-screenshot-partial-\(UUID().uuidString).png")
+            do {
+                try capture(temporary)
+                if fileManager.fileExists(atPath: url.path) {
+                    _ = try fileManager.replaceItemAt(url, withItemAt: temporary)
+                } else {
+                    try fileManager.moveItem(at: temporary, to: url)
+                }
+            } catch {
+                try? fileManager.removeItem(at: temporary)
+                throw error
+            }
+        }
+
+        func run() async throws {
+            let summary = try await DeviceSession.resolveDevice(udid: device.udid)
+            let url = try Self.resolveOutputURL(output: output, deviceName: summary.name)
+            try Self.captureAtomically(to: url) { temporary in
+                try Devicectl.run(arguments: Devicectl.screenshotArguments(deviceIdentifier: summary.udid, destination: temporary))
+            }
+            print(url.path)
+            FileHandle.standardError.write(Data("Screenshot saved to \(url.path)\n".utf8))
+        }
+    }
+
     struct Tap: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "tap",
@@ -229,7 +309,7 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
         }
 
         func validate() throws {
-            if let alias, id != nil {
+            if alias != nil, id != nil {
                 throw ValidationError("specify the identifier once — either the positional `#id` or --id, not both")
             }
             if let alias, !alias.hasPrefix("#") {

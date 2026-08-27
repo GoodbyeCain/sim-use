@@ -301,6 +301,158 @@ struct IOSDeviceBackendTests {
         }
     }
 
+    @Test("screenshot pins the devicectl argument vector")
+    func screenshotArgumentsAreStable() {
+        let args = Devicectl.screenshotArguments(
+            deviceIdentifier: "00008130-00066D2A10EB8D3A",
+            destination: URL(fileURLWithPath: "/tmp/shot.png")
+        )
+        #expect(args == [
+            "devicectl", "device", "capture", "screenshot",
+            "--device", "00008130-00066D2A10EB8D3A",
+            "--destination", "/tmp/shot.png",
+            "--timeout", "30",
+            "--quiet",
+        ])
+    }
+
+    @Test("devicectl failures surface the exit code and stderr")
+    func devicectlFailureSurfacesStderr() {
+        do {
+            try Devicectl.run(arguments: ["-c", "echo boom >&2; exit 3"], executablePath: "/bin/sh")
+            Issue.record("expected a non-zero exit to throw")
+        } catch {
+            #expect(error.localizedDescription.contains("exited 3"))
+            #expect(error.localizedDescription.contains("boom"))
+        }
+    }
+
+    @Test("devicectl success is silent")
+    func devicectlSuccessRuns() throws {
+        try Devicectl.run(arguments: ["-c", "echo ok"], executablePath: "/bin/sh")
+    }
+
+    @Test("device screenshot default filename mirrors the simulator convention")
+    func screenshotDefaultFilenameConvention() {
+        let name = IOSDeviceCommand.Screenshot.defaultFilename(
+            deviceName: "iPhone One",
+            at: Date(timeIntervalSince1970: 0)
+        )
+        #expect(name.hasPrefix("Device Screenshot - iPhone One - "))
+        #expect(name.hasSuffix(".png"))
+    }
+
+    @Test("a device name containing path separators stays a single filename component")
+    func deviceNameWithSlashesStaysSingleComponent() {
+        let name = IOSDeviceCommand.Screenshot.defaultFilename(
+            deviceName: "My iPhone/Work",
+            at: Date(timeIntervalSince1970: 0)
+        )
+        #expect(!name.contains("/"))
+        #expect(name.hasPrefix("Device Screenshot - My iPhone-Work - "))
+    }
+
+    @Test("a traversal-shaped device name cannot escape the current directory")
+    func traversalDeviceNameResolvesIntoCwd() throws {
+        let url = try IOSDeviceCommand.Screenshot.resolveOutputURL(output: nil, deviceName: "../../evil")
+        #expect(url.deletingLastPathComponent().path == FileManager.default.currentDirectoryPath)
+        #expect(!url.lastPathComponent.contains("/"))
+    }
+
+    @Test("a NAME_MAX-length target name still captures — the temporary name is independent of it")
+    func maxLengthTargetNameCaptures() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let name = String(repeating: "a", count: 251) + ".png"
+        #expect(name.utf8.count == 255)
+        let target = dir.appendingPathComponent(name)
+
+        try IOSDeviceCommand.Screenshot.captureAtomically(to: target) { temporary in
+            try Data("fresh".utf8).write(to: temporary)
+        }
+        #expect(try Data(contentsOf: target) == Data("fresh".utf8))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path) == [name])
+    }
+
+    @Test("a rejected non-PNG output path leaves the existing file intact")
+    func rejectedOutputPreservesExistingFile() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let existing = dir.appendingPathComponent("important.jpg")
+        let precious = Data("precious".utf8)
+        try precious.write(to: existing)
+
+        #expect(throws: (any Error).self) {
+            _ = try IOSDeviceCommand.Screenshot.resolveOutputURL(output: existing.path, deviceName: "iPhone One")
+        }
+        #expect(try Data(contentsOf: existing) == precious)
+    }
+
+    @Test("an accepted PNG output path defers deletion — the existing file survives resolution")
+    func acceptedOutputLeavesExistingFileUntilCapture() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let existing = dir.appendingPathComponent("shot.png")
+        let stale = Data("stale".utf8)
+        try stale.write(to: existing)
+
+        let url = try IOSDeviceCommand.Screenshot.resolveOutputURL(output: existing.path, deviceName: "iPhone One")
+        #expect(url == existing)
+        #expect(try Data(contentsOf: existing) == stale)
+    }
+
+    @Test("a failed capture leaves the existing screenshot intact and no temporary behind")
+    func failedCapturePreservesExistingFile() throws {
+        struct CaptureFailed: Error {}
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let target = dir.appendingPathComponent("important.png")
+        let precious = Data("precious".utf8)
+        try precious.write(to: target)
+
+        #expect(throws: CaptureFailed.self) {
+            try IOSDeviceCommand.Screenshot.captureAtomically(to: target) { temporary in
+                try Data("partial".utf8).write(to: temporary)
+                throw CaptureFailed()
+            }
+        }
+        #expect(try Data(contentsOf: target) == precious)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path) == ["important.png"])
+    }
+
+    @Test("a successful capture atomically replaces the existing screenshot")
+    func successfulCaptureReplacesExistingFile() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let target = dir.appendingPathComponent("shot.png")
+        try Data("stale".utf8).write(to: target)
+
+        try IOSDeviceCommand.Screenshot.captureAtomically(to: target) { temporary in
+            try Data("fresh".utf8).write(to: temporary)
+        }
+        #expect(try Data(contentsOf: target) == Data("fresh".utf8))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path) == ["shot.png"])
+    }
+
+    @Test("a successful capture creates the target when none exists")
+    func successfulCaptureCreatesFreshFile() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let target = dir.appendingPathComponent("shot.png")
+
+        try IOSDeviceCommand.Screenshot.captureAtomically(to: target) { temporary in
+            try Data("fresh".utf8).write(to: temporary)
+        }
+        #expect(try Data(contentsOf: target) == Data("fresh".utf8))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path) == ["shot.png"])
+    }
+
     @Test("device selection errors tell the user how to recover")
     func deviceSelectionErrorsAreActionable() {
         let none = DeviceSessionError.noDevices.localizedDescription
