@@ -45,6 +45,19 @@ struct PhysicalDeviceRoutingTests {
         #expect(result.output.contains("Hint:"), "\(invocation): \(result.output)")
     }
 
+    @Test("a physical UDID arriving via SIM_USE_DEVICE routes identically to --device")
+    func envVarRoutesLikeExplicitFlag() async throws {
+        // The physical check runs on the resolved value, not the flag —
+        // pin that the env-var path lands in the same per-verb
+        // capability rejection.
+        let result = try await TestHelpers.runSimUseCommandAllowFailure(
+            "type hello",
+            environment: ["SIM_USE_DEVICE": Self.physical]
+        )
+        #expect(result.exitCode != 0)
+        #expect(result.output.contains("not supported on physical iOS devices"))
+    }
+
     @Test("a rejecting verb honours --json with the standard error envelope")
     func rejectionSpeaksJSON() async throws {
         let result = try await TestHelpers.runSimUseCommandAllowFailure(
@@ -195,6 +208,24 @@ struct PhysicalDeviceRoutingTests {
             from: Data("{\"x\":1.5,\"y\":2.5}".utf8)
         )
         #expect(decoded.x == 1.5)
+        #expect(decoded.kind == nil)
+    }
+
+    @Test("describe-ui payloads from an older daemon (screen present, no kind) still decode")
+    func describeUIOldPayloadDecodes() throws {
+        // Rolling-upgrade fixture: the pre-#115 wire shape with a
+        // required `screen` and no `kind` key must keep decoding after
+        // `screen` went optional and `kind` was added.
+        let old = """
+        {"platform":"ios","raw":null,"outline":"o","entries":[],"lists":[],
+         "screen":{"x":0,"y":0,"width":390,"height":844},
+         "appLabel":"App","appPackage":"com.example"}
+        """
+        let decoded = try JSONDecoder().decode(
+            IOSSimDescribeUICommand.ExecutionResult.self,
+            from: Data(old.utf8)
+        )
+        #expect(decoded.screen == .init(x: 0, y: 0, width: 390, height: 844))
         #expect(decoded.kind == nil)
     }
 

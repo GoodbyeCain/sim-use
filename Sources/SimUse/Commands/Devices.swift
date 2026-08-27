@@ -55,7 +55,7 @@ struct Devices: SimUseExecutableCommand {
     @Flag(name: .customLong("all"), help: "Include devices that aren't currently usable (iOS Shutdown sims, Android offline / unauthorised devices). Default is booted-only.")
     var includeAll: Bool = false
 
-    @Flag(name: .customLong("no-physical-ios"), help: "Skip physical iPhone/iPad discovery (FBDeviceControl). Saves ~1 s on hosts with no device attached; simulators and Android are unaffected. Used by consumers that cannot drive physical iOS devices (e.g. the Viewer).")
+    @Flag(name: .customLong("no-physical-ios"), help: "Skip physical iPhone/iPad discovery (FBDeviceControl). Saves ~1 s on hosts with no device attached; simulators and Android are unaffected. Used by consumers that need capabilities physical iOS doesn't carry, e.g. the Viewer (coordinate taps, video streaming).")
     var noPhysicalIOS: Bool = false
 
     @Option(name: .customLong("platform"), help: "Restrict the list to one platform.")

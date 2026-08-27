@@ -138,10 +138,17 @@ struct Paste: SimUseExecutableCommand {
     }
 
     func clientPreflight() async {
-        // iOS-only soft-keyboard probe — Android goes through
-        // ACTION_PASTE and has no equivalent HID-keyboard trap.
-        guard !PlatformRouter.looksLikeAndroid(device.resolved) else { return }
-        await makeIOSSubcommand().clientPreflight()
+        // Simulator-only soft-keyboard probe — Android goes through
+        // ACTION_PASTE, and physical iOS rejects in execute() before
+        // any simulator machinery could apply. Keyed off the same
+        // routing decision as execute() (`.none` falls through to the
+        // iOS backend there, so it keeps the probe).
+        switch PlatformRouter.resolve(udid: device.resolved) {
+        case .android, .iOSDevice:
+            return
+        case .iOSSim, .none:
+            await makeIOSSubcommand().clientPreflight()
+        }
     }
 
     func execute() async throws -> ExecutionResult {
