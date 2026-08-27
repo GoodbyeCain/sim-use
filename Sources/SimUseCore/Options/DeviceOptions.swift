@@ -52,7 +52,15 @@ public struct DeviceOptions: ParsableArguments {
 
     public init() {}
 
-    public mutating func resolve() throws {
+    /// `allowPhysical` marks the caller as physical-iOS-aware: the 14
+    /// top-level cross-platform verbs pass `true` and route (or reject
+    /// per-verb via `TargetCapabilityError`) in their platform switch.
+    /// The `sim-use ios <verb>` namespace keeps the default `false` —
+    /// it is simulator-only by contract, so a physical UDID still
+    /// fast-fails here with a pointer to the routed surface instead of
+    /// surfacing as a confusing "simulator not found" deep in
+    /// FBSimulatorControl.
+    public mutating func resolve(allowPhysical: Bool = false) throws {
         let explicit = try Self.selectExplicit(device: device, udid: udid)
         if let arg = explicit, PlatformRouter.looksLikeAndroid(arg) {
             resolved = arg
@@ -61,8 +69,8 @@ public struct DeviceOptions: ParsableArguments {
         let candidate = try DeviceResolver.resolve(explicit: explicit)
         // Checked on the resolved value, not just the explicit flag, so a
         // physical UDID arriving via SIM_USE_DEVICE / SIM_USE_UDID is
-        // rejected identically.
-        guard !PlatformRouter.looksLikePhysicalIOSDevice(candidate) else {
+        // treated identically.
+        guard allowPhysical || !PlatformRouter.looksLikePhysicalIOSDevice(candidate) else {
             throw PhysicalIOSDeviceError(identifier: candidate)
         }
         resolved = candidate

@@ -64,7 +64,7 @@ struct KeyboardState: SimUseExecutableCommand {
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve()
+        try device.resolve(allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
@@ -77,6 +77,12 @@ struct KeyboardState: SimUseExecutableCommand {
                 platform: "android",
                 visible: state.visible,
                 imePackage: state.imePackage
+            )
+        case .iOSDevice:
+            throw TargetCapabilityError.physicalIOS(
+                verb: "keyboard-state",
+                reason: "the accessibility audit channel does not report keyboard visibility.",
+                alternative: "Re-run `sim-use ui` and inspect the outline for the state change you expect instead."
             )
         case .iOSSim, .none:
             let sub = makeIOSSubcommand()

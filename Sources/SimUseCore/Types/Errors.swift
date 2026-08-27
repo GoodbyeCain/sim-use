@@ -24,12 +24,15 @@ public struct CLIError: LocalizedError {
     }
 }
 
-/// The target identifier names a physical iPhone or iPad, which the
-/// simulator and Android backends cannot serve. Thrown during device
-/// resolution so every UDID-scoped verb rejects before dispatch with a
-/// pointer to the experimental `ios-device` surface, instead of the
-/// shape heuristics misreading the modern 8-16-hex device UDID as an
-/// unreachable Android serial.
+/// The target identifier names a physical iPhone or iPad, passed to a
+/// surface that is simulator-only by contract (`sim-use ios <verb>`).
+/// Thrown during device resolution (`DeviceOptions.resolve()` without
+/// `allowPhysical`) so the caller fails fast with a pointer to the
+/// routed top-level surface, instead of the shape heuristics misreading
+/// the modern 8-16-hex device UDID as an unreachable Android serial.
+/// The top-level cross-platform verbs no longer throw this: they route
+/// physical UDIDs through `PlatformRouter` and decide per verb
+/// (`TargetCapabilityError` when the capability is missing).
 public struct PhysicalIOSDeviceError: LocalizedError, HintProviding {
     public let identifier: String
 
@@ -38,10 +41,10 @@ public struct PhysicalIOSDeviceError: LocalizedError, HintProviding {
     }
 
     public var errorDescription: String? {
-        "\(identifier) looks like a physical iOS device; this command only drives iOS Simulators and Android devices/emulators."
+        "\(identifier) is a physical iOS device; this command only drives iOS Simulators."
     }
 
     public var hint: String? {
-        "Physical iPhones and iPads use the experimental 'sim-use ios-device' surface: 'ios-device devices' lists attached devices, 'ios-device ui' reads the foreground app's accessibility tree, 'ios-device tap' activates an element by label. See 'sim-use ios-device --help'."
+        "Use the top-level verbs, which route physical iOS devices automatically: 'sim-use ui', 'sim-use tap '#<id>' / --label', and 'sim-use screenshot' (experimental; other verbs are not available on this channel). The 'sim-use ios-device' namespace also works, and additionally accepts ECIDs."
     }
 }

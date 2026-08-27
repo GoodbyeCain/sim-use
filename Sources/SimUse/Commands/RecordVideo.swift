@@ -47,7 +47,7 @@ struct RecordVideo: SimUseExecutableCommand {
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve()
+        try device.resolve(allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
@@ -69,6 +69,12 @@ struct RecordVideo: SimUseExecutableCommand {
         switch PlatformRouter.resolve(udid: device.resolved) {
         case .android:
             return try await executeAndroid()
+        case .iOSDevice:
+            throw TargetCapabilityError.physicalIOS(
+                verb: "record-video",
+                reason: "video capture is not wired up for physical devices (CoreDevice screen recording is capability-gated per device).",
+                alternative: "Capture stills instead: `sim-use screenshot` works on any screen, system apps included."
+            )
         case .iOSSim, .none:
             return try await executeIOSSim()
         }

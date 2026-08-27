@@ -43,7 +43,7 @@ struct Swipe: SimUseExecutableCommand {
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve()
+        try device.resolve(allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
@@ -77,6 +77,12 @@ struct Swipe: SimUseExecutableCommand {
         switch PlatformRouter.resolve(udid: device.resolved) {
         case .android:
             return try await executeAndroid()
+        case .iOSDevice:
+            throw TargetCapabilityError.physicalIOS(
+                verb: "swipe",
+                reason: "swipes are coordinate HID sequences, and the accessibility audit channel exposes no coordinate input or element geometry.",
+                alternative: "Interact through accessibility actions instead: `sim-use ui` reads the outline, then `sim-use tap '#<id>' / --label` activates an element. Scrolling on physical devices is not available yet."
+            )
         case .iOSSim, .none:
             return try await executeIOSSim()
         }

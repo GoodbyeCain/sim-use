@@ -4,6 +4,7 @@ import Foundation
 import SimUseCore
 import AndroidBackend
 import iOSSimBackend
+import iOSDeviceBackend
 
 /// Top-level cross-platform `screenshot` verb. Owns the flag surface
 /// and resolves the target platform, then delegates to the per-backend
@@ -33,7 +34,7 @@ struct Screenshot: SimUseExecutableCommand {
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve()
+        try device.resolve(allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
@@ -51,6 +52,14 @@ struct Screenshot: SimUseExecutableCommand {
         switch PlatformRouter.resolve(udid: device.resolved) {
         case .android:
             return try executeAndroid()
+        case .iOSDevice:
+            // CoreDevice capture (shared with `sim-use ios-device
+            // screenshot`): any screen, no dev-signing requirement.
+            // The device-flavoured default filename ("Device Screenshot
+            // - …") is kept — it states the capture source, like the
+            // Android default embedding the serial.
+            let result = try await IOSDeviceCommand.Screenshot.performScreenshot(udid: device.resolved, output: output)
+            return ExecutionResult(path: result.path)
         case .iOSSim, .none:
             return try await executeIOSSim()
         }

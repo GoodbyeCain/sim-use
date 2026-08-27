@@ -82,6 +82,12 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
     /// `DESCRIBE_UI_OUTLINE.md` §4.
     public struct ExecutionResult: Codable, CommandAdvisoryProviding {
         public let platform: String
+        /// "physical" on physical-iOS results routed through the
+        /// top-level verb; absent otherwise. Additive key mirroring the
+        /// `Device.kind` axis, so agents can detect the restricted
+        /// shape (no frames, no aliases) without probing for missing
+        /// fields.
+        public let kind: String?
         /// Raw a11y tree passthrough. `nil` when the client didn't
         /// request `--json`, or opted out with `--no-raw` — the
         /// ~200 KB tree adds 80 ms of round-trip cost otherwise.
@@ -89,7 +95,9 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
         public let outline: String
         public let entries: [Outline.Entry]
         public let lists: [Outline.ListSummary]
-        public let screen: Outline.Frame
+        /// Screen bounds in platform-native units. `nil` on physical-iOS
+        /// results — the audit channel exposes no geometry.
+        public let screen: Outline.Frame?
         public let appLabel: String
         /// CFBundleIdentifier of the foreground app. iOS V1 leaves this
         /// empty when the AX tree doesn't expose it; resolution via
@@ -113,11 +121,12 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
 
         public init(
             platform: String,
+            kind: String? = nil,
             raw: JSONValue?,
             outline: String,
             entries: [Outline.Entry],
             lists: [Outline.ListSummary],
-            screen: Outline.Frame,
+            screen: Outline.Frame?,
             appLabel: String,
             appPackage: String,
             crashDialog: CrashDialogSignal? = nil,
@@ -125,6 +134,7 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             commandAdvisory: CommandAdvisory? = nil
         ) {
             self.platform = platform
+            self.kind = kind
             self.raw = raw
             self.outline = outline
             self.entries = entries
@@ -139,6 +149,7 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
 
         private enum CodingKeys: String, CodingKey {
             case platform
+            case kind
             case raw
             case outline
             case entries

@@ -4,6 +4,7 @@ import Foundation
 import SimUseCore
 import AndroidBackend
 import iOSSimBackend
+import iOSDeviceBackend
 
 /// Top-level cross-platform `tap` verb. Owns the verb-specific flag
 /// surface, resolves the target platform via `PlatformRouter`, then
@@ -91,7 +92,7 @@ struct Tap: SimUseExecutableCommand {
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve()
+        try device.resolve(allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
@@ -113,6 +114,8 @@ struct Tap: SimUseExecutableCommand {
         switch PlatformRouter.resolve(udid: device.resolved) {
         case .android:
             return try executeAndroid()
+        case .iOSDevice:
+            return try await executeIOSDevice()
         case .iOSSim, .none:
             // .none here means the UDID didn't match either platform
             // shape; defer to iOS so the existing "not booted /
@@ -123,7 +126,7 @@ struct Tap: SimUseExecutableCommand {
     }
 
     func format(_ result: ExecutionResult) -> CommandOutput {
-        .line("✓ Tap at (\(result.x), \(result.y)) completed successfully")
+        .line(result.summaryLine)
     }
 
     /// Forward to the iOS Simulator backend through its typed executor
@@ -179,5 +182,134 @@ struct Tap: SimUseExecutableCommand {
             multiTouch: multiTouch
         )
         return ExecutionResult(x: Double(result.x), y: Double(result.y))
+    }
+
+    /// Physical-iOS dispatch: routes the audit-channel-compatible subset
+    /// through `IOSDeviceCommand.Tap.performTap` (shared with
+    /// `sim-use ios-device tap`). Everything the channel cannot honour
+    /// rejects up front via the decision table below — before any
+    /// device I/O, so a wrong form fails in milliseconds, not after a
+    /// multi-second tree read. `--pre-delay` / `--post-delay` are plain
+    /// waits and are honoured like on the other platforms.
+    private func executeIOSDevice() async throws -> ExecutionResult {
+        if let rejection = Self.physicalFormRejection(
+            alias: alias,
+            targeting: targeting,
+            duration: duration,
+            timing: timing,
+            multiTouch: multiTouch
+        ) {
+            throw rejection
+        }
+        let identifier: String?
+        if let alias {
+            guard case .id(let value) = OutlineAliasResolver.parse(alias) else {
+                // The reject table already caught @N / #N / #N@M; what
+                // remains is a token parse() cannot read at all.
+                throw CLIError(errorDescription: "Positional target '\(alias)' is not a valid alias. On physical iOS devices use the literal `#<id>` shown in `sim-use ui`, or --label / --label-contains.")
+            }
+            identifier = value
+        } else {
+            identifier = targeting.elementID
+        }
+        if let preDelay = timing.preDelay, preDelay > 0 {
+            try await Task.sleep(nanoseconds: UInt64(preDelay * 1_000_000_000))
+        }
+        let result = try await IOSDeviceCommand.Tap.performTap(
+            udid: device.resolved,
+            identifier: identifier,
+            label: targeting.elementLabel,
+            labelContains: targeting.labelContains,
+            elementType: targeting.elementType
+        )
+        if let postDelay = timing.postDelay, postDelay > 0 {
+            try await Task.sleep(nanoseconds: UInt64(postDelay * 1_000_000_000))
+        }
+        return ExecutionResult(
+            action: result.action,
+            role: result.role,
+            label: result.label,
+            identifier: result.identifier
+        )
+    }
+
+    /// The decision table for tap forms on physical iOS: `#<id>`
+    /// (positional or --id), --label / --label-contains, and
+    /// --element-type route; every other form promises coordinate,
+    /// cache, or resolver semantics the audit channel cannot provide.
+    /// Static and pure so tests pin the whole table without a device.
+    static func physicalFormRejection(
+        alias: String?,
+        targeting: TapTargetingOptions,
+        duration: Double?,
+        timing: TapTimingOptions,
+        multiTouch: MultiTouchOptions
+    ) -> TargetCapabilityError? {
+        let interact = "Interact through accessibility actions instead: `sim-use ui` reads the outline, then `sim-use tap '#<id>'` or `--label` activates an element."
+        if targeting.hasExplicitCoordinates {
+            return .physicalIOS(
+                verb: "tap -x/-y/--point",
+                reason: "the accessibility audit channel exposes no element geometry or coordinate input.",
+                alternative: interact
+            )
+        }
+        if multiTouch.fingers > 1 || multiTouch.x2 != nil || multiTouch.y2 != nil {
+            return .physicalIOS(
+                verb: "tap --fingers/--x2/--y2",
+                reason: "multi-touch is coordinate HID, which the accessibility audit channel does not carry.",
+                alternative: interact
+            )
+        }
+        if duration != nil {
+            return .physicalIOS(
+                verb: "tap --duration",
+                reason: "the audit channel's only exposed action is Activate — there is no press-duration control.",
+                alternative: "Drop --duration; if the control needs a long press, that gesture is not available on physical iOS devices yet."
+            )
+        }
+        if targeting.elementValue != nil {
+            return .physicalIOS(
+                verb: "tap --value",
+                reason: "the physical-device resolver matches accessibility identifiers and labels only; element values are not surfaced on this channel.",
+                alternative: "Use `#<id>`, --label, or --label-contains (add --element-type to disambiguate)."
+            )
+        }
+        if targeting.labelRegex != nil {
+            return .physicalIOS(
+                verb: "tap --label-regex",
+                reason: "regex label matching is not implemented on the physical-device resolver.",
+                alternative: "Use --label for an exact match or --label-contains for a substring."
+            )
+        }
+        if !targeting.frameSpecs.isEmpty {
+            return .physicalIOS(
+                verb: "tap --frame",
+                reason: "frame filters need element geometry, which the accessibility audit channel does not expose.",
+                alternative: "Disambiguate with --element-type or a more specific label instead."
+            )
+        }
+        if timing.waitTimeout > 0 {
+            return .physicalIOS(
+                verb: "tap --wait-timeout",
+                reason: "element polling would re-read the multi-second device tree on every tick.",
+                alternative: "Re-run the tap after the UI settles (a full tree read costs seconds on this channel)."
+            )
+        }
+        switch alias.flatMap(OutlineAliasResolver.parse) {
+        case .at:
+            return .physicalIOS(
+                verb: "tap @N",
+                reason: "element handles expire between processes on this channel, so cached outline aliases cannot be replayed.",
+                alternative: "Use the stable `#<id>` shown in `sim-use ui`, or --label."
+            )
+        case .list:
+            return .physicalIOS(
+                verb: "tap #N / #N@M",
+                reason: "list-cell aliases come from the frame-based list detector, and the accessibility audit channel exposes no frames.",
+                alternative: "Use the literal `#<id>` shown in `sim-use ui`, or --label / --label-contains."
+            )
+        case .id, .none:
+            return nil
+        }
     }
 }

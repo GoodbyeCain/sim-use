@@ -40,7 +40,16 @@ struct PlatformRouterPhysicalDeviceTests {
         // (hex + dash, 25 chars, contains digits) and a plugged-in
         // iPhone was diagnosed as an unreachable adb serial.
         #expect(!PlatformRouter.looksLikeAndroid("00008130-00066D2A10EB8D3A"))
-        #expect(PlatformRouter.resolve(udid: "00008130-00066D2A10EB8D3A") == nil)
+    }
+
+    @Test("physical device shapes resolve to the iOSDevice platform")
+    func physicalShapesResolveToIOSDevice() {
+        #expect(PlatformRouter.resolve(udid: "00008130-00066D2A10EB8D3A") == .iOSDevice)
+        #expect(PlatformRouter.resolve(udid: "a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0") == .iOSDevice)
+        // Whitespace-tolerant like the other shapes.
+        #expect(PlatformRouter.resolve(udid: " 00008130-00066D2A10EB8D3A ") == .iOSDevice)
+        // ECIDs stay invisible to shape routing (documented non-goal).
+        #expect(PlatformRouter.resolve(udid: "1234567890123456") == .android)
     }
 
     @Test("real Android serials keep matching after the exclusion")

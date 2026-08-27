@@ -143,20 +143,21 @@ sim-use drives both **iOS Simulators** and **Android devices / emulators** throu
 
   * `1A2B3C4D-...` (UUID) → iOS Simulator
   * `emulator-5554` / `R5CT1ABCD12` / `192.168.1.5:5555` → Android device
+  * `00008130-...` (8-16 hex) / 40-hex → physical iPhone/iPad (restricted verb set)
 
 For Android, run `sim-use android init --device <serial>` once to install the bridge APK. See `AGENTS.md` for Android toolchain setup.
 
-**Development-signed apps on physical iPhones and iPads** are reachable under a separate, experimental `sim-use ios-device` surface. sim-use installs and signs no runner and needs no Developer Disk Image; the connected device must be unlocked and the foreground app must have `get-task-allow=true`. That channel exposes no element geometry, so it trades coordinate taps, swipes and gestures for accessibility actions. Attached physical devices do appear in the unified `sim-use devices` listing (kind `physical`). See [Physical iOS devices](#physical-ios-devices).
+**Physical iPhones and iPads** (experimental) route through the same top-level verbs — `sim-use ui`, `sim-use tap '#<id>' / --label` and `sim-use screenshot` work against a plugged-in device's UDID. The channel exposes no element geometry, so it trades coordinate taps, swipes and gestures for accessibility actions, and the remaining verbs reject with the reason and the nearest alternative — never assume capability parity; see the [capability matrix](#physical-ios-devices). sim-use installs and signs no runner and needs no Developer Disk Image; `ui`/`tap` need the foreground app to be development-signed (`get-task-allow=true`), `screenshot` captures any screen.
 
 
 ## Commands
 
 All device-scoped commands accept `--device <ID>` (optional when only one simulator is booted). Three command layers:
 
-  * **Top-level** — cross-platform verbs: `ui`, `tap`, `long-press`, `swipe`, `touch`, `multi-touch`, `type`, `paste`, `button`, `gesture`, `keyboard-state`, `screenshot`, `record-video`, `stream-video`, `app-state`. Same flags on iOS and Android.
-  * **`sim-use ios <verb>`** — iOS-only: `key`, `key-combo`, `key-sequence`, `batch`.
+  * **Top-level** — cross-platform verbs: `ui`, `tap`, `long-press`, `swipe`, `touch`, `multi-touch`, `type`, `paste`, `button`, `gesture`, `keyboard-state`, `screenshot`, `record-video`, `stream-video`, `app-state`. Same flags on iOS and Android; physical iOS devices route through `ui`, `tap` and `screenshot` only (the rest reject with the reason — see the [capability matrix](#physical-ios-devices)).
+  * **`sim-use ios <verb>`** — iOS-Simulator-only: `key`, `key-combo`, `key-sequence`, `batch`.
   * **`sim-use android <verb>`** — Android-only: `init`, `devices`, `ping`, `scroll`.
-  * **`sim-use ios-device <verb>`** — physical iOS devices (experimental): `devices`, `ui`, `screenshot`, `tap`. Separate from the top-level verbs because the capabilities differ — see [Physical iOS devices](#physical-ios-devices).
+  * **`sim-use ios-device <verb>`** — physical-iOS-only: `devices`, `ui`, `screenshot`, `tap` (experimental). Peer of `ios`/`android`; also accepts ECIDs and the hierarchy tuning flags the top level doesn't carry.
 
 Run `sim-use --help` or `sim-use <command> --help` for the full flag set.
 
@@ -169,7 +170,7 @@ sim-use devices
 UDID="B34FF305-5EA8-412B-943F-1D0371CA17FF"
 ```
 
-One listing covers every target: iOS Simulators (`simctl`), Android devices and emulators (`adb`), and USB-attached physical iPhones/iPads (`FBDeviceControl`). `KIND` — `simulator` / `emulator` / `physical` — is orthogonal to `PLATFORM` and also appears as `kind` in `--json`; capabilities follow the kind (see [Physical iOS devices](#physical-ios-devices) for what physical iOS supports). `--no-physical-ios` skips the FBDeviceControl side entirely (~1 s saved when no device is attached) — the Viewer passes it, since physical iOS targets aren't operable through the top-level verbs it drives.
+One listing covers every target: iOS Simulators (`simctl`), Android devices and emulators (`adb`), and USB-attached physical iPhones/iPads (`FBDeviceControl`). `KIND` — `simulator` / `emulator` / `physical` — is orthogonal to `PLATFORM` and also appears as `kind` in `--json`; capabilities follow the kind (see [Physical iOS devices](#physical-ios-devices) for what physical iOS supports). `--no-physical-ios` skips the FBDeviceControl side entirely (~1 s saved when no device is attached) — the Viewer passes it, since it drives coordinate taps and video streaming, neither of which physical iOS supports.
 
 ### Touch & gestures
 
@@ -408,46 +409,65 @@ codesign -d --entitlements :- /path/to/MyApp.app
 # ... <key>get-task-allow</key><true/> ...
 ```
 
-```bash
-sim-use ios-device devices           # or `sim-use devices` — attached physical
-# 00008140-000210603A40801C  My iPhone  iOS 27.0  Booted     # devices appear there with kind `physical`
+The top-level verbs route a physical UDID automatically — the same observe → act → verify loop as every other target:
 
-sim-use ios-device ui --device 00008140-000210603A40801C
+```bash
+sim-use devices                      # physical devices appear with kind `physical`
+# ios  physical  Booted  My iPhone  00008140-000210603A40801C  iOS 27.0
+UDID="00008140-000210603A40801C"
+
+sim-use ui --device $UDID
 # Button  "Chats Button, Selected"
 # Button  "Friends"
 # Button  "Settings"  #settingsButton
 # ...
 # 117 elements (316 nodes) in 6647 ms
 
-sim-use ios-device tap --label "Friends" --element-type Button \
-  --device 00008140-000210603A40801C
+sim-use tap --label "Friends" --element-type Button --device $UDID
 # Sent Activate to 'Friends' [Button]
 
 # Dynamic labels can use the regular substring selector vocabulary.
-sim-use ios-device tap --label-contains "Reply" --element-type Button
+sim-use tap --label-contains "Reply" --element-type Button --device $UDID
 
-# Or target the stable accessibility identifier shown as #id — the same
-# `#id` positional the simulator tap accepts (--id works too).
-sim-use ios-device tap '#BackButton'
+# Or target the stable accessibility identifier shown as #id.
+sim-use tap '#BackButton' --device $UDID
 
 # Screenshot — any screen, not limited to development-signed apps. Prints the
 # absolute saved path on stdout (plus a confirmation on stderr).
-sim-use ios-device screenshot
+sim-use screenshot --device $UDID
 # /Users/me/Device Screenshot - My iPhone - 2026-08-27 at 09.34.10.png
-sim-use ios-device screenshot --output shot.png
 
-# Every verb also takes --json (the shared {ok, data} envelope).
-sim-use ios-device tap '#BackButton' --json
-# {"ok":true,"data":{"action":"Activate","identifier":"BackButton","label":"sim-use Playground","role":"Button"}}
+# --json everywhere, shared {ok, data} envelope.
+sim-use tap '#BackButton' --json --device $UDID
+# {"ok":true,"data":{"action":"Activate","identifier":"BackButton","kind":"physical","label":"sim-use Playground","role":"Button"}}
 ```
 
-A device is addressed by UDID or ECID, and `--device` is optional only when exactly one is attached. A freshly attached device may be listed by ECID until a session has opened (AMDevice publishes the lockdown UDID lazily); both identifiers are accepted. Run `ui` again after every action: accessibility actions are fire-and-forget, so the follow-up read is the authoritative verification.
+The `sim-use ios-device` namespace remains as the physical-only peer of `ios`/`android` — same three verbs plus `devices`, and additionally accepts ECIDs (shape-based routing can't recognise a bare ECID) and hierarchy tuning flags (`--fast`, `--concurrency`, `--connections`).
 
-Passing a physical device UDID to a top-level or `sim-use ios` verb fails fast with a pointer back to this surface — those verbs only drive iOS Simulators and Android devices.
+A device is addressed by UDID or ECID, and `--device` is optional only when exactly one is attached (top-level auto-resolution still picks booted simulators only). A freshly attached device may be listed by ECID until a session has opened (AMDevice publishes the lockdown UDID lazily). Run `ui` again after every action: accessibility actions are fire-and-forget, so the follow-up read is the authoritative verification.
+
+### Capability matrix
+
+**Never assume capability parity with the simulator.** Only three verbs route; everything else fails with the reason and the nearest alternative (as a `hint` in `--json`):
+
+| Verb | Simulator | Android | Physical iOS |
+|---|---|---|---|
+| `ui` / `describe-ui` | ✅ | ✅ | ✅ outline + `#id`s only — no `@N` aliases, frames, or `--point` |
+| `tap` | ✅ | ✅ | ✅ `#<id>` / `--id` / `--label` / `--label-contains` / `--element-type` only |
+| `screenshot` | ✅ | ✅ | ✅ any screen (CoreDevice) |
+| `swipe`, `gesture`, `touch`, `multi-touch`, `long-press` | ✅ | ✅ | ❌ no coordinate input or geometry |
+| `tap -x/-y/--point`, `@N` / `#N` aliases, `--value`, `--label-regex`, `--frame`, `--duration`, `--wait-timeout` | ✅ | ✅ | ❌ rejected per form |
+| `type`, `paste` | ✅ | ✅ | ❌ no text-input channel yet |
+| `button`, `keyboard-state` | ✅ | ✅ | ❌ |
+| `record-video`, `stream-video` | ✅ | ✅ | ❌ use `screenshot` |
+| `ios key` / `key-combo` / `key-sequence` / `batch` | ✅ | ❌ | ❌ |
+| `app-state` | ✅ | ✅ | ❌ |
+
+Pass a physical UDID to a `sim-use ios <verb>` (simulator-only by contract) and it fails fast with a pointer back to the routed verbs.
 
 This channel deliberately differs from the simulator backend:
 
-  * **No element geometry.** There is no coordinate tap, `swipe`, `gesture` or `multi-touch`. Only the exposed `tap` accessibility action is currently supported; unsupported simulator verbs are not routed here.
+  * **No element geometry.** There is no coordinate tap, `swipe`, `gesture` or `multi-touch`. Only the exposed `tap` accessibility action is currently supported; the other verbs reject a physical UDID with the reason and the nearest alternative rather than degrading silently.
   * **No `@N` aliases, but stable `#id`s.** Element handles encode a live pointer and expire with their DTX connection, so — like the missing geometry — the cross-invocation `@N` alias cannot be backed faithfully and the outline advertises none. The stable accessibility identifier *can*: the outline shows each element's `#id`, and `tap` accepts it as a positional `#<id>` or `--id` (mirroring the simulator), alongside `--label` / `--label-contains` / `--element-type`. Prefer the `#id` when a label is dynamic — a navigation-bar back button is labelled with the previous screen's title but keeps `#BackButton`, and is an ordinary, tappable row in the outline.
   * **Screenshots go over CoreDevice, not the audit daemon.** `screenshot` shells out to `xcrun devicectl device capture screenshot`, a separate channel with different rules: it is not limited to development-signed foreground apps and captures whatever is on screen, SpringBoard and system apps included. Screen *recording* exists on the same channel (`devicectl device capture screen-record`) but is capability-gated per device (CoreDevice can report "Screen Recording is not supported by this device") and is not exposed yet.
   * **No recording yet.** Screen recording is not exposed (see the CoreDevice capability gate above). `--json` *is* supported on every `ios-device` verb, with the same `{ok, data}` envelope as the rest of the CLI: `devices` returns unified device rows (the `deviceId` / `kind` / `runtime` schema of top-level `sim-use devices --json`), `ui` returns the outline text plus structured rows (`depth` / `role` / `label` / `#identifier`) with element/node counts and timing, `tap` returns the matched element, and `screenshot` returns the saved path. Errors carry a machine-readable `hint` alongside the message.
