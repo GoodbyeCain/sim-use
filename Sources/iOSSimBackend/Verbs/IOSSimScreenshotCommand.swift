@@ -80,61 +80,19 @@ public struct IOSSimScreenshotCommand: SimUseExecutableCommand {
     /// Resolve the user-supplied `--output` argument into a concrete
     /// file URL using iOS naming conventions. Public so tests can
     /// pin the path expansion behaviour without spinning up an
-    /// FBSimulator.
+    /// FBSimulator. Path semantics live in `OutputFilePath`, shared
+    /// with the video verbs and the physical-device screenshot.
     public static func prepareOutputURL(output: String?, simulatorName: String) throws -> URL {
-        let fileManager = FileManager.default
-
-        let providedPath = output?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedPath: String
-        if let providedPath, !providedPath.isEmpty {
-            resolvedPath = (providedPath as NSString).expandingTildeInPath
-        } else {
-            let timestamp = formatTimestamp(Date())
-            resolvedPath = "Simulator Screenshot - \(simulatorName) - \(timestamp).png"
+        try OutputFilePath.resolve(output: output) {
+            "Simulator Screenshot - \(simulatorName) - \(formatTimestamp(Date())).png"
         }
-
-        let baseURL: URL
-        if resolvedPath.hasPrefix("/") {
-            baseURL = URL(fileURLWithPath: resolvedPath)
-        } else {
-            baseURL = URL(fileURLWithPath: fileManager.currentDirectoryPath).appendingPathComponent(resolvedPath)
-        }
-
-        var isDirectory: ObjCBool = false
-        if fileManager.fileExists(atPath: baseURL.path, isDirectory: &isDirectory), isDirectory.boolValue {
-            let timestamp = formatTimestamp(Date())
-            let filename = "Simulator Screenshot - \(simulatorName) - \(timestamp).png"
-            let directoryURL = baseURL
-            if !fileManager.fileExists(atPath: directoryURL.path) {
-                try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true, attributes: nil)
-            }
-            return directoryURL.appendingPathComponent(filename)
-        }
-
-        let directoryURL = baseURL.deletingLastPathComponent()
-        if !fileManager.fileExists(atPath: directoryURL.path) {
-            try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true, attributes: nil)
-        }
-
-        if fileManager.fileExists(atPath: baseURL.path) {
-            var existingIsDirectory: ObjCBool = false
-            fileManager.fileExists(atPath: baseURL.path, isDirectory: &existingIsDirectory)
-            if existingIsDirectory.boolValue {
-                throw CLIError(errorDescription: "Output path \(baseURL.path) is a directory. Provide a file name or point to a different location.")
-            }
-            try fileManager.removeItem(at: baseURL)
-        }
-
-        return baseURL
     }
 
     /// Shared timestamp format used by both iOS and Android default
     /// filenames so paired screenshots from cross-platform sessions
     /// sort together.
     public static func formatTimestamp(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
-        return formatter.string(from: date)
+        OutputFilePath.screenshotTimestamp(date)
     }
 
 }

@@ -301,6 +301,47 @@ struct IOSDeviceBackendTests {
         }
     }
 
+    @Test("screenshot pins the devicectl argument vector")
+    func screenshotArgumentsAreStable() {
+        let args = Devicectl.screenshotArguments(
+            deviceIdentifier: "00008130-00066D2A10EB8D3A",
+            destination: URL(fileURLWithPath: "/tmp/shot.png")
+        )
+        #expect(args == [
+            "devicectl", "device", "capture", "screenshot",
+            "--device", "00008130-00066D2A10EB8D3A",
+            "--destination", "/tmp/shot.png",
+            "--timeout", "30",
+            "--quiet",
+        ])
+    }
+
+    @Test("devicectl failures surface the exit code and stderr")
+    func devicectlFailureSurfacesStderr() {
+        do {
+            try Devicectl.run(arguments: ["-c", "echo boom >&2; exit 3"], executablePath: "/bin/sh")
+            Issue.record("expected a non-zero exit to throw")
+        } catch {
+            #expect(error.localizedDescription.contains("exited 3"))
+            #expect(error.localizedDescription.contains("boom"))
+        }
+    }
+
+    @Test("devicectl success is silent")
+    func devicectlSuccessRuns() throws {
+        try Devicectl.run(arguments: ["-c", "echo ok"], executablePath: "/bin/sh")
+    }
+
+    @Test("device screenshot default filename mirrors the simulator convention")
+    func screenshotDefaultFilenameConvention() {
+        let name = IOSDeviceCommand.Screenshot.defaultFilename(
+            deviceName: "iPhone One",
+            at: Date(timeIntervalSince1970: 0)
+        )
+        #expect(name.hasPrefix("Device Screenshot - iPhone One - "))
+        #expect(name.hasSuffix(".png"))
+    }
+
     @Test("device selection errors tell the user how to recover")
     func deviceSelectionErrorsAreActionable() {
         let none = DeviceSessionError.noDevices.localizedDescription

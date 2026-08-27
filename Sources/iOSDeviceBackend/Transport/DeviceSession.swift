@@ -109,14 +109,17 @@ public enum DeviceSession {
     @MainActor
     public static func connectedDevices(logger: FBControlCoreLogger? = nil) async throws -> [DeviceSummary] {
         let set = try deviceSet(logger: logger)
-        return attachedDevices(set).map {
-            DeviceSummary(
-                udid: $0.identity,
-                name: $0.name,
-                osVersion: $0.osVersion.name.rawValue,
-                state: FBiOSTargetStateStringFromState($0.state).rawValue
-            )
-        }
+        return attachedDevices(set).map(summary(of:))
+    }
+
+    /// Resolves a device the way `withClient` does — same discovery, same
+    /// selection and error surface — without opening the audit service, for
+    /// verbs that hand the actual work to another channel (e.g. `screenshot`
+    /// via `devicectl`).
+    @MainActor
+    public static func resolveDevice(udid: String?, logger: FBControlCoreLogger? = nil) throws -> DeviceSummary {
+        let set = try deviceSet(logger: logger)
+        return summary(of: try resolve(udid, among: attachedDevices(set)))
     }
 
     @MainActor
@@ -208,6 +211,15 @@ public enum DeviceSession {
             }
         }
         return attached.isEmpty ? set.allDevices : attached
+    }
+
+    private static func summary(of device: FBDevice) -> DeviceSummary {
+        DeviceSummary(
+            udid: device.identity,
+            name: device.name,
+            osVersion: device.osVersion.name.rawValue,
+            state: FBiOSTargetStateStringFromState(device.state).rawValue
+        )
     }
 
     /// AMDevice does not publish the lockdown UDID until a session is opened,

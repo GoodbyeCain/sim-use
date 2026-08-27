@@ -88,7 +88,7 @@ Every byte of command output you read costs context. Defaults that keep the loop
 
 Use the separate `sim-use ios-device` surface. Never route a physical iPhone or iPad through the top-level or `sim-use ios` verbs.
 
-**Hard requirement:** the device must be paired, trusted, unlocked and in Developer Mode, and the foreground target app must be development-signed with `get-task-allow=true`. A Release-configuration binary installed with a Development profile is supported. Distribution/Ad Hoc, TestFlight, App Store and system apps are unsupported; do not retry them or claim success. sim-use itself installs and signs no runner and needs no Developer Disk Image.
+**Hard requirement for `ui` / `tap`:** the device must be paired, trusted, unlocked and in Developer Mode, and the foreground target app must be development-signed with `get-task-allow=true`. A Release-configuration binary installed with a Development profile is supported. Distribution/Ad Hoc, TestFlight, App Store and system apps are unsupported; do not retry them or claim success. sim-use itself installs and signs no runner and needs no Developer Disk Image. `screenshot` is exempt from the signing rule — it runs over CoreDevice and captures any screen, system apps included.
 
 ```bash
 # Physical-device preflight
@@ -105,6 +105,9 @@ sim-use ios-device tap --label-contains "Reply" --element-type Button --device <
 
 # By stable identifier (the #id shown in ui) — positional or --id, like the simulator
 sim-use ios-device tap '#BackButton' --device <UDID>
+
+# Screenshot — any screen, not limited to development-signed apps
+sim-use ios-device screenshot --output shot.png --device <UDID>
 ```
 
 Rules for this experimental surface:
@@ -112,7 +115,7 @@ Rules for this experimental surface:
 1. **Treat hierarchy errors as capability failures.** If the command says the hierarchy is unavailable, confirm the screen is unlocked and inspect the installed app's final `get-task-allow` entitlement. Do not fall back to coordinates or focus walking.
 2. **Tap by `#id` or label, not `@N`.** Element handles expire with the DTX connection, so there is no `@N` alias (nor coordinates — no geometry). Use the `#id` shown in the outline (positional `#<id>` or `--id`) — it is stable and the best choice when a label is dynamic — or `--label` / `--label-contains`, with `--element-type` to disambiguate. The navigation-bar back button appears as a normal `Button "<previous screen title>" #BackButton`; go back by tapping `#BackButton` (or the shown label) like any other element — no special "back" verb.
 3. **Always verify.** Activate is fire-and-forget. Re-run `sim-use ios-device ui` and confirm the expected state before continuing.
-4. **No geometry or simulator-only verbs.** Coordinate tap, swipe, gesture, multi-touch, type, screenshot, recording and `--json` are unavailable here. Do not substitute a similarly named top-level command.
+4. **No geometry or simulator-only verbs.** Coordinate tap, swipe, gesture, multi-touch, type, recording and `--json` are unavailable here. Do not substitute a similarly named top-level command. `screenshot` *is* available and works on any screen (it captures over CoreDevice, not the accessibility channel).
 5. **Budget seconds, not milliseconds.** A full tree takes a few seconds. `ui --fast` is quicker but omits nested elements; do not poll in a tight loop.
 
 If `ui` succeeds with zero elements or `tap` prints success for a missing/ambiguous label, treat it as a sim-use bug; the command is expected to fail loudly instead.

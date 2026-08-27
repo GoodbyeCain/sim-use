@@ -118,9 +118,10 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
 
         Element geometry is not available on this channel, so there is no
         coordinate tap, swipe or gesture here; interaction goes through
-        accessibility actions instead.
+        accessibility actions instead. The display itself can still be
+        captured with `screenshot`.
         """,
-        subcommands: [Devices.self, UI.self, Tap.self]
+        subcommands: [Devices.self, UI.self, Screenshot.self, Tap.self]
     )
 
     public init() {}
@@ -183,6 +184,45 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
         }
     }
 
+    struct Screenshot: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "screenshot",
+            abstract: "Capture a screenshot of the device display and save it as a PNG file.",
+            discussion: """
+            Captures over CoreDevice (`xcrun devicectl device capture
+            screenshot`) rather than the accessibility audit channel, so it
+            is not limited to development-signed foreground apps: whatever is
+            on screen is captured, SpringBoard and system apps included. The
+            device is selected exactly like the other ios-device verbs.
+            """
+        )
+
+        @OptionGroup var device: DeviceOptions
+
+        @Option(help: "Output PNG file path. Defaults to 'Device Screenshot - <device name> - <timestamp>.png' in the current directory.")
+        var output: String?
+
+        /// Mirrors the simulator's default naming so paired screenshots from
+        /// cross-platform sessions sort together. Static so tests can pin the
+        /// convention without a device.
+        static func defaultFilename(deviceName: String, at date: Date) -> String {
+            "Device Screenshot - \(deviceName) - \(OutputFilePath.screenshotTimestamp(date)).png"
+        }
+
+        func run() async throws {
+            let summary = try await DeviceSession.resolveDevice(udid: device.udid)
+            let url = try OutputFilePath.resolve(output: output) {
+                Self.defaultFilename(deviceName: summary.name, at: Date())
+            }
+            guard url.pathExtension.lowercased() == "png" else {
+                throw CLIError(errorDescription: "devicectl writes PNG only — use an output path ending in .png (got '\(url.lastPathComponent)')")
+            }
+            try Devicectl.run(arguments: Devicectl.screenshotArguments(deviceIdentifier: summary.udid, destination: url))
+            print(url.path)
+            FileHandle.standardError.write(Data("Screenshot saved to \(url.path)\n".utf8))
+        }
+    }
+
     struct Tap: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "tap",
@@ -229,7 +269,7 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
         }
 
         func validate() throws {
-            if let alias, id != nil {
+            if alias != nil, id != nil {
                 throw ValidationError("specify the identifier once — either the positional `#id` or --id, not both")
             }
             if let alias, !alias.hasPrefix("#") {
