@@ -17,7 +17,7 @@ This verifies sim-use is installed, the device is reachable, and the daemon is h
 2. `sim-use devices` — confirm the target device is listed and booted/connected.
 3. `sim-use ui --device <UDID>` — confirm you can read the screen.
 
-`--device` is optional when only one simulator is booted or one daemon is running. For Android, run `sim-use android init --device <serial>` once to install the bridge APK. Attached physical iPhones/iPads appear in `sim-use devices` with kind `physical`, but their verbs use the separate experimental surface shown below; do not route them through these top-level commands.
+`--device` is optional when only one simulator is booted or one daemon is running. For Android, run `sim-use android init --device <serial>` once to install the bridge APK. Attached physical iPhones/iPads appear in `sim-use devices` with kind `physical` and route through the top-level verbs too — but only `ui`, selector-based `tap` and `screenshot`; every other verb rejects on that target. See *Physical iOS devices* below before driving one.
 
 ## 1. The observe-act loop
 
