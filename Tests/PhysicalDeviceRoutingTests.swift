@@ -22,6 +22,7 @@ struct PhysicalDeviceRoutingTests {
     @Test(
         "every non-routed verb rejects a physical UDID with the capability boundary",
         arguments: [
+            "app-state",
             "button home",
             "gesture scroll-up",
             "keyboard-state",
