@@ -33,6 +33,7 @@ struct Devices: SimUseExecutableCommand {
           sim-use devices                          # currently usable devices, all targets
           sim-use devices --all                    # also include shutdown / offline
           sim-use devices --platform ios           # iOS only (simulators + physical)
+          sim-use devices --no-physical-ios        # skip FBDeviceControl discovery entirely
           sim-use devices --json                   # structured output (Viewer, scripts, agents)
 
         JSON envelope (--json):
@@ -53,6 +54,9 @@ struct Devices: SimUseExecutableCommand {
 
     @Flag(name: .customLong("all"), help: "Include devices that aren't currently usable (iOS Shutdown sims, Android offline / unauthorised devices). Default is booted-only.")
     var includeAll: Bool = false
+
+    @Flag(name: .customLong("no-physical-ios"), help: "Skip physical iPhone/iPad discovery (FBDeviceControl). Saves ~1 s on hosts with no device attached; simulators and Android are unaffected. Used by consumers that cannot drive physical iOS devices (e.g. the Viewer).")
+    var noPhysicalIOS: Bool = false
 
     @Option(name: .customLong("platform"), help: "Restrict the list to one platform.")
     var platform: Device.Platform?
@@ -153,7 +157,7 @@ struct Devices: SimUseExecutableCommand {
     }
 
     private func listPhysicalIOS() async -> SideResult {
-        if platform == .android { return SideResult(devices: [], failed: false) }
+        if platform == .android || noPhysicalIOS { return SideResult(devices: [], failed: false) }
         do {
             // FBDeviceControl discovery pumps the main run loop until the
             // attachment set quiesces (~0.4 s attached, ~1 s empty-grace

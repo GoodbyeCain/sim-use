@@ -197,7 +197,7 @@ struct ViewerAPIHandlersTests {
 
     @Test("devices: zero exit with ok:true envelope returns 200 with devices")
     func devicesSuccess() async throws {
-        let envelope = #"{"ok":true,"data":{"devices":[{"deviceId":"ABC","name":"iPhone","platform":"ios","runtime":"iOS 18.0"}]}}"#
+        let envelope = #"{"ok":true,"data":{"devices":[{"deviceId":"ABC","name":"iPhone","platform":"ios","kind":"simulator","runtime":"iOS 18.0"}]}}"#
         let (handlers, cleanup) = try makeHandlers(stdout: envelope, exitCode: 0)
         defer { cleanup() }
         let response = await handlers.devices(getRequest())
@@ -207,6 +207,29 @@ struct ViewerAPIHandlersTests {
         let devices = try #require(body["devices"] as? [[String: Any]])
         #expect(devices.count == 1)
         #expect(devices.first?["deviceId"] as? String == "ABC")
+        #expect(devices.first?["kind"] as? String == "simulator")
+    }
+
+    @Test("devices: excludes physical iOS at the source and forwards kind")
+    func devicesExcludesPhysicalIOSAtSource() async throws {
+        // The Viewer drives devices through the top-level verbs, which
+        // don't accept physical iOS targets — so the handler must pass
+        // --no-physical-ios (excluding them at the source, and skipping
+        // the ~1 s FBDeviceControl discovery) rather than advertising
+        // rows the SPA cannot operate. Android physical remains listed
+        // and operable; `kind` lets the SPA tell it from an emulator.
+        let envelope = #"{"ok":true,"data":{"devices":[{"deviceId":"R5CT1ABCD12","name":"Pixel 8","platform":"android","kind":"physical","runtime":"Android"}]}}"#
+        let (handlers, cleanup) = try makeHandlers(stdout: envelope, exitCode: 0, recordArgs: true)
+        defer { cleanup() }
+
+        let response = await handlers.devices(getRequest())
+        #expect(response.status == 200)
+        #expect(try recordedArgs(of: handlers) == "devices --json --no-physical-ios")
+
+        let body = try jsonBody(response)
+        let devices = try #require(body["devices"] as? [[String: Any]])
+        #expect(devices.first?["kind"] as? String == "physical")
+        #expect(devices.first?["platform"] as? String == "android")
     }
 
     @Test("snapshot: spawns describe-ui with --json --no-raw")

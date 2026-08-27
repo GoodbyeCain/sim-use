@@ -169,7 +169,7 @@ sim-use devices
 UDID="B34FF305-5EA8-412B-943F-1D0371CA17FF"
 ```
 
-One listing covers every target: iOS Simulators (`simctl`), Android devices and emulators (`adb`), and USB-attached physical iPhones/iPads (`FBDeviceControl`). `KIND` — `simulator` / `emulator` / `physical` — is orthogonal to `PLATFORM` and also appears as `kind` in `--json`; capabilities follow the kind (see [Physical iOS devices](#physical-ios-devices) for what physical iOS supports).
+One listing covers every target: iOS Simulators (`simctl`), Android devices and emulators (`adb`), and USB-attached physical iPhones/iPads (`FBDeviceControl`). `KIND` — `simulator` / `emulator` / `physical` — is orthogonal to `PLATFORM` and also appears as `kind` in `--json`; capabilities follow the kind (see [Physical iOS devices](#physical-ios-devices) for what physical iOS supports). `--no-physical-ios` skips the FBDeviceControl side entirely (~1 s saved when no device is attached) — the Viewer passes it, since physical iOS targets aren't operable through the top-level verbs it drives.
 
 ### Touch & gestures
 
