@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import ArgumentParser
 import Foundation
+import SimUseCore
 import Testing
 @testable import iOSDeviceBackend
 
@@ -451,6 +452,23 @@ struct IOSDeviceBackendTests {
         }
         #expect(try Data(contentsOf: target) == Data("fresh".utf8))
         #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path) == ["shot.png"])
+    }
+
+    @Test("physical device summaries map to unified ios/physical rows")
+    func deviceSummaryMapsToUnifiedRow() {
+        let summary = DeviceSession.DeviceSummary(
+            udid: "00008130-00066D2A10EB8D3A",
+            name: "iPhone One",
+            osVersion: "iOS 26.6",
+            state: "Booted"
+        )
+        let device = summary.unifiedDevice
+        #expect(device.platform == .ios)
+        #expect(device.kind == .physical)
+        #expect(device.udid == "00008130-00066D2A10EB8D3A")
+        #expect(device.name == "iPhone One")
+        #expect(device.runtime == "iOS 26.6")
+        #expect(device.isUsable)
     }
 
     @Test("device selection errors tell the user how to recover")

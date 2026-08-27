@@ -29,7 +29,12 @@ struct ViewerAPIHandlers {
 
     func devices(_ request: HTTPRequest) async -> HTTPResponse {
         do {
-            let result = try await run(arguments: ["devices", "--json"])
+            // `--no-physical-ios`: the Viewer drives devices through the
+            // top-level verbs, which don't accept physical iOS targets —
+            // exclude them at the source (also skipping the ~1 s
+            // FBDeviceControl discovery) instead of advertising rows the
+            // SPA cannot operate.
+            let result = try await run(arguments: ["devices", "--json", "--no-physical-ios"])
             let envelope = parseEnvelope(result.stdout)
             if let failure = failureResponse(envelope: envelope, result: result) {
                 return failure
@@ -49,6 +54,7 @@ struct ViewerAPIHandlers {
                 slim["deviceId"] = id
                 slim["name"] = d["name"] ?? ""
                 slim["platform"] = d["platform"] ?? ""
+                slim["kind"] = d["kind"] ?? ""
                 slim["runtime"] = d["runtime"] ?? ""
                 return slim
             }

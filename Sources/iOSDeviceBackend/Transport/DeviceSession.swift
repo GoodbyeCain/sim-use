@@ -2,6 +2,7 @@
 import FBControlCore
 import FBDeviceControl
 import Foundation
+import SimUseCore
 
 public enum DeviceSessionError: Error, LocalizedError, CustomStringConvertible {
     case noDevices
@@ -104,6 +105,27 @@ public enum DeviceSession {
         public let name: String
         public let osVersion: String
         public let state: String
+
+        public init(udid: String, name: String, osVersion: String, state: String) {
+            self.udid = udid
+            self.name = name
+            self.osVersion = osVersion
+            self.state = state
+        }
+
+        /// The cross-platform `sim-use devices` row for this device.
+        /// `udid` may be an ECID when AMDevice hasn't published the
+        /// lockdown UDID yet (see `FBDevice.identity`) — surfaced as-is.
+        public var unifiedDevice: Device {
+            Device(
+                udid: udid,
+                name: name,
+                platform: .ios,
+                kind: .physical,
+                state: state,
+                runtime: osVersion
+            )
+        }
     }
 
     @MainActor
