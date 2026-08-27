@@ -203,10 +203,13 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
         var output: String?
 
         /// Mirrors the simulator's default naming so paired screenshots from
-        /// cross-platform sessions sort together. Static so tests can pin the
-        /// convention without a device.
+        /// cross-platform sessions sort together. The device name is
+        /// user-editable free text, so it is collapsed into a single safe
+        /// path component first — "My iPhone/Work" must not create a
+        /// directory hierarchy. Static so tests can pin the convention
+        /// without a device.
         static func defaultFilename(deviceName: String, at date: Date) -> String {
-            "Device Screenshot - \(deviceName) - \(OutputFilePath.screenshotTimestamp(date)).png"
+            "Device Screenshot - \(OutputFilePath.safeFilenameComponent(deviceName)) - \(OutputFilePath.screenshotTimestamp(date)).png"
         }
 
         /// Resolve, validate the extension, then ensure the parent directory
@@ -227,12 +230,15 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
         /// Captures into a temporary sibling file and moves it over the final
         /// target only on success, so a capture that fails mid-flight (device
         /// unplugged, devicectl timeout) leaves an existing file at --output
-        /// untouched. The temporary name keeps the .png suffix devicectl
-        /// requires. Injectable capture so tests can pin the failure branch.
+        /// untouched. The temporary basename is fixed and short — deriving it
+        /// from the target name would push a NAME_MAX-length (255-byte)
+        /// target over the per-component limit — and keeps the .png suffix
+        /// devicectl requires. Injectable capture so tests can pin the
+        /// failure branch.
         static func captureAtomically(to url: URL, capture: (URL) throws -> Void) throws {
             let fileManager = FileManager.default
             let temporary = url.deletingLastPathComponent()
-                .appendingPathComponent(".\(url.lastPathComponent).partial-\(UUID().uuidString).png")
+                .appendingPathComponent(".sim-use-screenshot-partial-\(UUID().uuidString).png")
             do {
                 try capture(temporary)
                 if fileManager.fileExists(atPath: url.path) {

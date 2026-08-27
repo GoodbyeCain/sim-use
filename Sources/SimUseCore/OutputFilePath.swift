@@ -80,6 +80,15 @@ public enum OutputFilePath {
         }
     }
 
+    /// Collapse a free-form name (e.g. a user-editable device name) into a
+    /// single path component for default filenames: path separators become
+    /// "-" so a name like "My iPhone/Work" cannot introduce directory
+    /// hierarchy — or, via "..", escape the target directory — when the name
+    /// is embedded in a default filename.
+    public static func safeFilenameComponent(_ name: String) -> String {
+        name.replacingOccurrences(of: "/", with: "-")
+    }
+
     /// Timestamp format shared by every screenshot default filename so paired
     /// screenshots from cross-platform sessions sort together.
     public static func screenshotTimestamp(_ date: Date) -> String {

@@ -342,6 +342,39 @@ struct IOSDeviceBackendTests {
         #expect(name.hasSuffix(".png"))
     }
 
+    @Test("a device name containing path separators stays a single filename component")
+    func deviceNameWithSlashesStaysSingleComponent() {
+        let name = IOSDeviceCommand.Screenshot.defaultFilename(
+            deviceName: "My iPhone/Work",
+            at: Date(timeIntervalSince1970: 0)
+        )
+        #expect(!name.contains("/"))
+        #expect(name.hasPrefix("Device Screenshot - My iPhone-Work - "))
+    }
+
+    @Test("a traversal-shaped device name cannot escape the current directory")
+    func traversalDeviceNameResolvesIntoCwd() throws {
+        let url = try IOSDeviceCommand.Screenshot.resolveOutputURL(output: nil, deviceName: "../../evil")
+        #expect(url.deletingLastPathComponent().path == FileManager.default.currentDirectoryPath)
+        #expect(!url.lastPathComponent.contains("/"))
+    }
+
+    @Test("a NAME_MAX-length target name still captures — the temporary name is independent of it")
+    func maxLengthTargetNameCaptures() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let name = String(repeating: "a", count: 251) + ".png"
+        #expect(name.utf8.count == 255)
+        let target = dir.appendingPathComponent(name)
+
+        try IOSDeviceCommand.Screenshot.captureAtomically(to: target) { temporary in
+            try Data("fresh".utf8).write(to: temporary)
+        }
+        #expect(try Data(contentsOf: target) == Data("fresh".utf8))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path) == [name])
+    }
+
     @Test("a rejected non-PNG output path leaves the existing file intact")
     func rejectedOutputPreservesExistingFile() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
