@@ -84,7 +84,10 @@ struct Screenshot: SimUseExecutableCommand {
 
     private func resolveAndroidOutputPath(serial: String) -> String {
         let stamp = IOSSimScreenshotCommand.formatTimestamp(Date())
-        let defaultName = "Android Screenshot - \(serial) - \(stamp).png"
+        // The adb-serial charset the Android router accepts already excludes
+        // path separators; the sanitiser is defence in depth should those
+        // routing rules ever loosen.
+        let defaultName = "Android Screenshot - \(OutputFilePath.safeFilenameComponent(serial)) - \(stamp).png"
         guard let provided = output?.trimmingCharacters(in: .whitespacesAndNewlines), !provided.isEmpty else {
             return FileManager.default.currentDirectoryPath + "/" + defaultName
         }
