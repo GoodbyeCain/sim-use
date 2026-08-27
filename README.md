@@ -424,9 +424,10 @@ sim-use ios-device tap --label-contains "Reply" --element-type Button
 # `#id` positional the simulator tap accepts (--id works too).
 sim-use ios-device tap '#BackButton'
 
-# Screenshot — any screen, not limited to development-signed apps.
+# Screenshot — any screen, not limited to development-signed apps. Prints the
+# absolute saved path on stdout (plus a confirmation on stderr).
 sim-use ios-device screenshot
-# Screenshot saved to ./Device Screenshot - My iPhone - 2026-08-27 at 09.34.10.png
+# /Users/me/Device Screenshot - My iPhone - 2026-08-27 at 09.34.10.png
 sim-use ios-device screenshot --output shot.png
 ```
 

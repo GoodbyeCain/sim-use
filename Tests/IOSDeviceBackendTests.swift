@@ -342,6 +342,34 @@ struct IOSDeviceBackendTests {
         #expect(name.hasSuffix(".png"))
     }
 
+    @Test("a rejected non-PNG output path leaves the existing file intact")
+    func rejectedOutputPreservesExistingFile() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let existing = dir.appendingPathComponent("important.jpg")
+        let precious = Data("precious".utf8)
+        try precious.write(to: existing)
+
+        #expect(throws: (any Error).self) {
+            _ = try IOSDeviceCommand.Screenshot.resolveOutputURL(output: existing.path, deviceName: "iPhone One")
+        }
+        #expect(try Data(contentsOf: existing) == precious)
+    }
+
+    @Test("an accepted PNG output path removes the existing file so the write replaces it")
+    func acceptedOutputReplacesExistingFile() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let existing = dir.appendingPathComponent("shot.png")
+        try Data("stale".utf8).write(to: existing)
+
+        let url = try IOSDeviceCommand.Screenshot.resolveOutputURL(output: existing.path, deviceName: "iPhone One")
+        #expect(url == existing)
+        #expect(!FileManager.default.fileExists(atPath: existing.path))
+    }
+
     @Test("device selection errors tell the user how to recover")
     func deviceSelectionErrorsAreActionable() {
         let none = DeviceSessionError.noDevices.localizedDescription

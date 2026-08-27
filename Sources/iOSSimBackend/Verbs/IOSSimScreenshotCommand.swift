@@ -83,9 +83,11 @@ public struct IOSSimScreenshotCommand: SimUseExecutableCommand {
     /// FBSimulator. Path semantics live in `OutputFilePath`, shared
     /// with the video verbs and the physical-device screenshot.
     public static func prepareOutputURL(output: String?, simulatorName: String) throws -> URL {
-        try OutputFilePath.resolve(output: output) {
+        let url = OutputFilePath.resolve(output: output) {
             "Simulator Screenshot - \(simulatorName) - \(formatTimestamp(Date())).png"
         }
+        try OutputFilePath.prepare(url)
+        return url
     }
 
     /// Shared timestamp format used by both iOS and Android default

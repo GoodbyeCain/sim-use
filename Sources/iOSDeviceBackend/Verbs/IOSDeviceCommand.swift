@@ -209,14 +209,23 @@ public struct IOSDeviceCommand: AsyncParsableCommand {
             "Device Screenshot - \(deviceName) - \(OutputFilePath.screenshotTimestamp(date)).png"
         }
 
-        func run() async throws {
-            let summary = try await DeviceSession.resolveDevice(udid: device.udid)
-            let url = try OutputFilePath.resolve(output: output) {
-                Self.defaultFilename(deviceName: summary.name, at: Date())
+        /// Resolve, validate, then prepare — in that order, so a rejected
+        /// non-PNG path never removes an existing file at the target.
+        /// Static so tests can pin that guarantee without a device.
+        static func resolveOutputURL(output: String?, deviceName: String) throws -> URL {
+            let url = OutputFilePath.resolve(output: output) {
+                defaultFilename(deviceName: deviceName, at: Date())
             }
             guard url.pathExtension.lowercased() == "png" else {
                 throw CLIError(errorDescription: "devicectl writes PNG only — use an output path ending in .png (got '\(url.lastPathComponent)')")
             }
+            try OutputFilePath.prepare(url)
+            return url
+        }
+
+        func run() async throws {
+            let summary = try await DeviceSession.resolveDevice(udid: device.udid)
+            let url = try Self.resolveOutputURL(output: output, deviceName: summary.name)
             try Devicectl.run(arguments: Devicectl.screenshotArguments(deviceIdentifier: summary.udid, destination: url))
             print(url.path)
             FileHandle.standardError.write(Data("Screenshot saved to \(url.path)\n".utf8))

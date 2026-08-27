@@ -4,15 +4,21 @@ import Foundation
 /// Output-path resolution shared by every file-producing verb (screenshots,
 /// video recordings) across platform backends, so `--output` behaves the same
 /// everywhere: trim and tilde-expand the supplied path, anchor relative paths
-/// at the current directory, treat an existing directory as the destination
+/// at the current directory, treat an existing directory as a destination
 /// for a default-named file, create missing parent directories, and replace
 /// an existing file.
+///
+/// Resolution and preparation are deliberately separate steps: `resolve`
+/// never touches the filesystem beyond read-only stats, so a caller can
+/// validate the resolved URL (e.g. enforce an extension) and reject it
+/// without having destroyed an existing file at the target.
 public enum OutputFilePath {
     /// Resolve the user-supplied `--output` argument into a concrete file
     /// URL. `defaultFilename` is consulted when no path is supplied or when
     /// the path names an existing directory; it is invoked at most once per
-    /// call so timestamped names stay consistent.
-    public static func resolve(output: String?, defaultFilename: () -> String) throws -> URL {
+    /// call so timestamped names stay consistent. Performs no filesystem
+    /// mutation — call `prepare(_:)` before writing to the returned URL.
+    public static func resolve(output: String?, defaultFilename: () -> String) -> URL {
         let fileManager = FileManager.default
         var cachedDefault: String?
         func defaultName() -> String {
@@ -42,21 +48,27 @@ public enum OutputFilePath {
             return baseURL.appendingPathComponent(defaultName())
         }
 
-        let directoryURL = baseURL.deletingLastPathComponent()
+        return baseURL
+    }
+
+    /// Destructive preparation of a resolved output URL: create missing
+    /// parent directories and remove an existing file at the target so the
+    /// subsequent write replaces it.
+    public static func prepare(_ url: URL) throws {
+        let fileManager = FileManager.default
+
+        let directoryURL = url.deletingLastPathComponent()
         if !fileManager.fileExists(atPath: directoryURL.path) {
             try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true, attributes: nil)
         }
 
-        if fileManager.fileExists(atPath: baseURL.path) {
-            var existingIsDirectory: ObjCBool = false
-            fileManager.fileExists(atPath: baseURL.path, isDirectory: &existingIsDirectory)
-            if existingIsDirectory.boolValue {
-                throw CLIError(errorDescription: "Output path \(baseURL.path) is a directory. Provide a file name or point to a different location.")
+        var isDirectory: ObjCBool = false
+        if fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) {
+            if isDirectory.boolValue {
+                throw CLIError(errorDescription: "Output path \(url.path) is a directory. Provide a file name or point to a different location.")
             }
-            try fileManager.removeItem(at: baseURL)
+            try fileManager.removeItem(at: url)
         }
-
-        return baseURL
     }
 
     /// Timestamp format shared by every screenshot default filename so paired

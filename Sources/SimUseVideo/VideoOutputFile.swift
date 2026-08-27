@@ -10,10 +10,12 @@ public enum VideoOutputFile {
     /// platform backend and the cross-platform forwarder use the same
     /// path semantics (`OutputFilePath`).
     public static func prepareOutputURL(output: String?, fileExtension: String = "mp4") throws -> URL {
-        try OutputFilePath.resolve(output: output) {
+        let url = OutputFilePath.resolve(output: output) {
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withInternetDateTime]
             return "sim-use-video-\(formatter.string(from: Date())).\(fileExtension)"
         }
+        try OutputFilePath.prepare(url)
+        return url
     }
 }
