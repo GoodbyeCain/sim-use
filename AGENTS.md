@@ -104,15 +104,17 @@ After any non-trivial change, at minimum:
 
 ## Module layout
 
-Five SwiftPM targets; dependency graph flows in one direction.
+Seven macOS SwiftPM targets plus a Linux executable; dependency graph flows in one direction.
 
 | Target | Path | Depends on |
 |---|---|---|
 | `SimUseCore` | `Sources/SimUseCore/` | Foundation + ArgumentParser |
 | `SimUseVideo` | `Sources/SimUseVideo/` | SimUseCore + AVFoundation/ImageIO |
 | `iOSSimBackend` | `Sources/iOSSimBackend/` | SimUseCore + SimUseVideo + FB* XCFrameworks + AVFoundation |
+| `iOSDeviceBackend` | `Sources/iOSDeviceBackend/` | SimUseCore + FBDeviceControl + FBControlCore |
+| `HarmonyOSBackend` | `Sources/HarmonyOSBackend/` | SimUseCore + ArgumentParser |
 | `AndroidBackend` | `Sources/AndroidBackend/` | SimUseCore + SimUseVideo + ArgumentParser |
-| `SimUse` (executable) | `Sources/SimUse/` | SimUseCore + SimUseVideo + iOSSimBackend + AndroidBackend + FB* |
+| `SimUse` (executable) | `Sources/SimUse/` | SimUseCore + SimUseVideo + iOSSimBackend + iOSDeviceBackend + AndroidBackend + HarmonyOSBackend + FB* |
 | `SimUseLinux` (executable, Linux only) | `Sources/SimUseLinux/` | SimUseCore + AndroidBackend |
 
 On Linux, `Package.swift` declares only `SimUseCore`, `AndroidBackend` (without its three video-capture files) and `SimUseLinux` — see `docs/ai/008-linux-android-build/linux-guide.md`. Linux-only shims live in `Sources/SimUseCore/LinuxCompat.swift`; `swift build` / `swift test` run there directly.
@@ -121,11 +123,12 @@ On Linux, `Package.swift` declares only `SimUseCore`, `AndroidBackend` (without 
 
 ### Verb dispatch
 
-A verb (tap, swipe, type, ...) reaches three surfaces:
+A verb (tap, swipe, type, ...) reaches four platform surfaces:
 
 1. **Top-level** — `Sources/SimUse/Commands/<Verb>.swift`. Resolves the target via `PlatformRouter`, then forwards to the iOS or Android backend.
 2. **`sim-use ios <verb>`** — `Sources/iOSSimBackend/Verbs/IOSSim<Verb>Command.swift`.
 3. **`sim-use android <verb>`** — `Sources/AndroidBackend/Verbs/Android<Verb>Command.swift`.
+4. **HarmonyOS** — commands under Sources/HarmonyOSBackend/Verbs, selected explicitly with --platform harmonyos at the top level.
 
 Four verbs are iOS-only (`key`, `key-combo`, `key-sequence`, `batch`) — no top-level alias.
 
@@ -137,7 +140,7 @@ Four verbs are iOS-only (`key`, `key-combo`, `key-sequence`, `batch`) — no top
 
 ### Daemon
 
-`SimUseExecutableCommand.run()` forwards UDID-scoped verbs to a per-UDID auto-spawned daemon (`Sources/SimUseCore/Daemon/`). Platform-agnostic — both iOS and Android verbs route through it. The `daemon` command itself lives in SimUseCore; each executable installs `Daemon.installPlatformHooks` (its root parser plus backend probes) at launch. A daemon is keyed by UDID alone, so each executable also installs `DaemonClient.connectionIdentityProvider`: the daemon reports the identity it started under in `_ping`, and the client's version gate restarts it when its own differs (Android: adb server + bridge host, via `BridgeConnection`). Each business request also carries the client's identity, and the daemon refuses a mismatch before it parses the request (`DaemonDispatch.connectionMismatchOutcome`), because a `_ping` that times out behind a busy daemon proves nothing. Key regression test: `Tests/DaemonCommandParserInjectionTests.swift`.
+`SimUseExecutableCommand.run()` forwards UDID-scoped verbs to a per-UDID auto-spawned daemon (`Sources/SimUseCore/Daemon/`). Platform-agnostic — both iOS and Android verbs route through it. The `daemon` command itself lives in SimUseCore; each executable installs `Daemon.installPlatformHooks` (its root parser plus backend probes) at launch. A daemon is keyed by UDID alone, so each executable also installs `DaemonClient.connectionIdentityProvider`: the daemon reports the identity it started under in `_ping`, and the client's version gate restarts it when its own differs (Android: adb server + bridge host, via `BridgeConnection`). Each business request also carries the client's identity, and the daemon refuses a mismatch before it parses the request (`DaemonDispatch.connectionMismatchOutcome`), because a `_ping` that times out behind a busy daemon proves nothing. HarmonyOS verbs bypass the daemon because adb and hdc device IDs can collide. Key regression test: `Tests/DaemonCommandParserInjectionTests.swift`.
 
 ## Android development
 

@@ -5,6 +5,13 @@ import Testing
 
 @Suite("PlatformRouter — physical iOS device shape")
 struct PlatformRouterPhysicalDeviceTests {
+    @Test("iOS platform override preserves physical-device routing")
+    func iosOverridePreservesDeviceKind() {
+        #expect(PlatformRouter.resolve(udid: "00008130-00066D2A10EB8D3A", override: .ios) == .iOSDevice)
+        #expect(PlatformRouter.resolve(udid: "12345678-1234-1234-1234-123456789ABC", override: .ios) == .iOSSim)
+        #expect(PlatformRouter.resolve(udid: "00008130-00066D2A10EB8D3A", override: .harmonyos) == .harmonyOS)
+    }
+
     @Test("modern 8-16-hex device UDID is recognised as physical")
     func modernShapeIsPhysical() {
         #expect(PlatformRouter.looksLikePhysicalIOSDevice("00008130-00066D2A10EB8D3A"))

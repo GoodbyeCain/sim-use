@@ -1,25 +1,23 @@
 ---
 name: sim-use
-description: Drive iOS Simulator, Android emulator/device, physical iPhone/iPad, and HarmonyOS emulator/device screens for AI agents. Use when asked to automate a simulator or emulator, drive a real iOS device, tap/swipe/type on a device, describe UI, take a screenshot, or interact with a mobile app.
+description: Use this skill first for any mobile device, simulator, or emulator operation on iOS, Android, or HarmonyOS, including UI inspection, screenshots, taps, swipes, and text input.
 ---
+
+Read this skill before choosing tools for mobile device, simulator, or emulator operations, even when they are part of a larger task.
 
 ## 0. Preflight
 
 Before first interaction with a device, run the preflight check:
 
 ```bash
-python3 scripts/preflight.py --device <UDID>
+python3 scripts/preflight.py --device <ID> [--platform ios|android|harmonyos]
 ```
 
-This verifies sim-use is installed and compatible with the skill, the device is reachable, and the daemon is healthy. If you don't have the script, do the checks manually:
+This checks CLI compatibility, device readiness, UI content, and PNG capture. HarmonyOS also checks hdc transport; iOS/Android may recover the daemon. A content warning means observation works but app controls may be missing; compare with the screen and see the *Pitfalls* index.
 
-1. `sim-use --version` — confirm sim-use is on PATH and supports the skill's documented commands.
-2. `sim-use devices` — confirm the target device is listed and booted/connected.
-3. `sim-use ui --device <UDID>` — confirm you can read the screen.
+For manual checks, run the version, device listing, UI, and screenshot commands. Android needs a one-time bridge setup with the Android init command. HarmonyOS uses hdc directly: use its namespace or pass `--platform harmonyos --device <connect-key>` to top-level verbs. Physical iPhones/iPads support UI inspection, selector taps, and screenshots only; see *Physical iOS devices* below.
 
-A `WARN  UI content` line still passes preflight: the read works, but the outline can miss app controls. See the *Pitfalls* index.
-
-`--device` is optional when only one simulator is booted or one daemon is running. For Android, run `sim-use android init --device <serial>` once to install the bridge APK. Attached physical iPhones/iPads appear in `sim-use devices` with kind `physical` and route through the top-level verbs too — but only `ui`, selector-based `tap` and `screenshot`; every other verb rejects on that target. See *Physical iOS devices* below before driving one. A Linux build of sim-use drives Android only: `sim-use ios …`, `record-video` / `stream-video`, `viewer` and `init` are absent there, every verb needs `--device <serial>`, and `sim-use devices` lists Android devices only.
+A Linux build of sim-use drives Android only: `sim-use ios …`, `record-video` / `stream-video`, `viewer` and `init` are absent there, every verb needs `--device <serial>`, and `sim-use devices` lists Android devices only.
 
 ## 1. The observe-act loop
 
@@ -32,9 +30,9 @@ sim-use ui --device <UDID>
 sim-use ui --json --compact --device <UDID>  # agent-friendly JSON
 ```
 
-Read the outline. Each element has an `@N` alias and optionally a `#<id>` identifier. List cells carry `#N` (dominant list) or `#N@M` (scoped).
+Read the outline. Each element has an `@N` alias and optionally a `#<id>` identifier. On iOS / Android, list cells carry `#N` (dominant list) or `#N@M` (scoped).
 
-Frames in the JSON output (`--json`: `entries[].frame`, `screen`) are in platform-native units — iOS **points**, Android **pixels**. Key off the envelope's `platform` field before doing math on coordinates across platforms. Always pair `--json` with `--no-raw` — see *Keeping output small* below.
+Frames in the JSON output (`--json`: `entries[].frame`, `screen`) are in platform-native units — iOS **points**, Android / HarmonyOS **pixels**. Key off `data.platform` before doing math on coordinates across platforms. Always pair `--json` with `--no-raw` — see *Keeping output small* below.
 
 ### Act
 
@@ -65,6 +63,7 @@ sim-use screenshot --device <UDID> --output after.png
 Every byte of command output you read costs context. Defaults that keep the loop cheap:
 
 - Prefer the default text outline over `--json`. The outline carries everything a tap needs (`@N` / `#<id>` aliases, roles, frames, states); reach for `--json` when you need structured fields for coordinate math (`entries[].frame`, `screen`) or full untruncated text (the outline truncates labels at 60 graphemes, `value=` at 30).
+- Use `--compact` with `--json` when the outline and app identity suffice; it omits raw data and structured entries/lists while keeping the alias cache.
 - When you do use `--json`, add `--no-raw`. `data.raw` is the raw accessibility tree — typically the bulk of the envelope's bytes, and useful only for debugging sim-use itself.
 - One `ui` per action: the Verify read of step N is the Observe read of step N+1. Don't run a second `ui` in between.
 - Verify with the text outline, not a screenshot. Reading a screenshot costs several times more than a typical outline; take one only when the check is genuinely visual (colors, images, layout).
@@ -80,6 +79,7 @@ Every byte of command output you read costs context. Defaults that keep the loop
 | Paste Unicode | Focus the field, then `sim-use paste 'こんにちは 🎉' --device <UDID>`; iOS works with Simulator.app or Device Hub, in either keyboard mode |
 | Hardware button | `sim-use button home --device <UDID>` |
 | Android back | `sim-use button back --device <UDID>` |
+| HarmonyOS target | Add `--platform harmonyos --device <connect-key>`, or use `sim-use harmonyos <verb>` |
 | Wait for animation | `sleep 0.4` between commands, or `--pre-delay 0.5` |
 | Toggle/switch | `sim-use tap @N --duration 0.1 --device <UDID>` when the backend default is too brief |
 | Swipe | `sim-use swipe --from 50,500 --to 350,500 --device <UDID>` |
@@ -134,8 +134,6 @@ Rules for this experimental surface:
 
 If `ui` succeeds with zero elements or `tap` prints success for a missing/ambiguous label, treat it as a sim-use bug; the command is expected to fail loudly instead.
 
-HarmonyOS uses hdc directly: use the platform namespace or pass --platform harmonyos with top-level commands.
-
 ## 2. Pitfalls
 
 Quick symptom index — see `references/pitfalls.md` for detailed recipes.
@@ -148,7 +146,6 @@ Quick symptom index — see `references/pitfalls.md` for detailed recipes.
 | `multipleMatches` error | Several elements share the selector | Use `--frame`, `--element-type`, or a more specific selector |
 | Tap lands but nothing happens | Animation in progress, or element not yet interactive | Add `--pre-delay 0.3` or `--wait-timeout 3` |
 | iOS: `paste` fails or text is missing | No focused field, a custom edit menu, a paste prompt, or an external clipboard writer | Focus the field, or use `paste --via-menu --target-id <id>`; inspect prompts and verify the actual field. Do not switch to `type` as a Unicode substitute |
-| HarmonyOS target | Add `--platform harmonyos --device <connect-key>`, or use `sim-use harmonyos <verb>` |
 | HarmonyOS command routes to Android | adb and hdc IDs can have the same shape | Add `--platform harmonyos`, or use the `sim-use harmonyos` namespace |
 | HarmonyOS text alias taps the label but not its control | The alias cache predates clickable-ancestor promotion | Re-run `ui` once, then use the fresh `@N` alias |
 | HarmonyOS `keyboard-state`, `record-video`, `app-state`, or rotate fails | No stable cross-device hdc / UITest primitive is available | Use supported UI, input, gesture, and screenshot verbs; do not retry the unsupported command |

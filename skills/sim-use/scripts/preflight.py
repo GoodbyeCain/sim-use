@@ -14,12 +14,10 @@ from pathlib import Path
 from typing import Callable, Optional
 
 
+MINIMUM_SIM_USE_VERSION = (0, 16, 0)
+
 ONLINE_STATES = {"booted", "device", "connected", "ready"}
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-VERSION_PATTERN = re.compile(
-    r"\b(?:\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?|[0-9a-f]{7,40}(?:-dirty)?)\b",
-    re.IGNORECASE,
-)
 
 
 @dataclass
@@ -41,6 +39,8 @@ class Ctx:
     errors: list[str] = field(default_factory=list)
     detail: str = ""
     version: str = ""
+    content_warning: Optional[str] = None
+    ui_is_ios_simulator: bool = False
 
     def set_detail(self, message: str) -> None:
         self.detail = message.strip()
@@ -171,11 +171,14 @@ def check_sim_use_version(ctx: Ctx) -> bool:
     if result.returncode != 0:
         ctx.set_detail(result_diagnostic(result))
         return False
-    match = VERSION_PATTERN.search(result.stdout)
-    if match is None:
-        ctx.set_detail(f"unrecognized version output: {clipped(result.stdout)}")
+    ctx.version = (result.stdout or result.stderr).strip()
+    if not ctx.version:
+        ctx.set_detail("version output is empty")
         return False
-    ctx.version = match.group(0)
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", ctx.version)
+    if match and tuple(int(part) for part in match.groups()) < MINIMUM_SIM_USE_VERSION:
+        ctx.set_detail("Upgrade sim-use to >= 0.16.0: brew update && brew upgrade lycorp-jp/tap/sim-use")
+        return False
     return True
 
 
@@ -259,6 +262,7 @@ def check_harmonyos_ping(ctx: Ctx) -> bool:
 
 
 def check_ui_responds(ctx: Ctx) -> bool:
+    ctx.content_warning = None
     envelope = ctx.run_sim_use_json("ui", "--compact")
     if envelope is None:
         return False
@@ -274,11 +278,40 @@ def check_ui_responds(ctx: Ctx) -> bool:
     if not isinstance(data.get("outline"), str) or not data["outline"].strip():
         ctx.set_detail("UI response has an empty data.outline")
         return False
+    is_physical_ios = data.get("platform") == "ios" and data.get("kind") == "physical"
+    ctx.ui_is_ios_simulator = data.get("platform") == "ios" and not is_physical_ios
+    advisory = envelope.get("advisory")
+    if isinstance(advisory, dict) and advisory.get("kind") == "remote_content_recovery":
+        ctx.content_warning = "remote_content_recovery"
+    # Compact output always clears entries, so inspect the outline instead.
+    elif not is_physical_ios and not any(
+        line.strip() and not line.startswith("App:") for line in data["outline"].splitlines()
+    ):
+        ctx.content_warning = "empty_outline"
     screen = data.get("screen")
-    if not isinstance(screen, dict) or screen.get("width", 0) <= 0 or screen.get("height", 0) <= 0:
+    if not is_physical_ios and not ctx.content_warning and (
+        not isinstance(screen, dict) or screen.get("width", 0) <= 0 or screen.get("height", 0) <= 0
+    ):
         ctx.set_detail("UI response has invalid data.screen dimensions")
         return False
     return True
+
+
+def print_content_warning(ctx: Ctx) -> None:
+    if ctx.content_warning == "remote_content_recovery":
+        print("  WARN  UI content: remote_content_recovery")
+        print("        The app tree was empty; content was recovered from other processes.")
+        print("        This can be normal for a system picker.")
+    else:
+        print("  WARN  UI content: empty outline")
+        print("        The read succeeded, but the outline contains no elements.")
+    print("        Compare the outline with the visible screen.")
+    if ctx.ui_is_ios_simulator:
+        print("        If visible app controls are missing, check ApplicationAccessibilityEnabled")
+        print("        in com.apple.Accessibility before an app relaunch.")
+    print("        See 'Missing app controls in the outline' in references/pitfalls.md.")
+
+
 
 
 def check_screenshot_responds(ctx: Ctx) -> bool:
@@ -403,11 +436,14 @@ def main() -> None:
     passed = run_checks(base_checks(), ctx)
     if passed:
         passed = run_checks(readiness_checks(ctx), ctx)
+    if passed and ctx.content_warning:
+        print_content_warning(ctx)
     print()
 
     if passed:
+        summary = "Preflight passed with a content warning" if ctx.content_warning else "All checks passed"
         print(
-            f"All checks passed. Device: {ctx.device or '(auto-resolved)'} "
+            f"{summary}. Device: {ctx.device or '(auto-resolved)'} "
             f"({ctx.platform or 'unknown'}), sim-use {ctx.version}."
         )
         print("Transport and observation are ready; continue to verify every interaction result.")

@@ -8,7 +8,8 @@ struct InitTests {
     func printOutputsSkill() async throws {
         let result = try await TestHelpers.runSimUseCommand("init --print")
         #expect(result.output.contains("name: sim-use"))
-        #expect(result.output.contains("Drive iOS Simulator, Android emulator/device, physical iPhone/iPad, and HarmonyOS"))
+        let source = try String(contentsOfFile: "skills/sim-use/SKILL.md", encoding: .utf8)
+        #expect(result.output.trimmingCharacters(in: .whitespacesAndNewlines) == source.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     @Test("installs skill to custom destination")

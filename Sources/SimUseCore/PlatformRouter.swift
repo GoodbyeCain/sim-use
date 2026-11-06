@@ -31,7 +31,7 @@ public enum PlatformRouter {
     public static func resolve(udid: String, override: Device.Platform? = nil) -> Platform? {
         if let override {
             switch override {
-            case .ios: return .iOSSim
+            case .ios: return looksLikePhysicalIOSDevice(udid) ? .iOSDevice : .iOSSim
             case .android: return .android
             case .harmonyos: return .harmonyOS
             }

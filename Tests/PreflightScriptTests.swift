@@ -17,7 +17,7 @@ struct PreflightScriptTests {
         )
 
         #expect(result.exitCode == 0, "preflight should pass with fake sim-use: \(result.output)")
-        #expect(result.output.contains("sim-use 0.11.0"))
+        #expect(result.output.contains("sim-use 0.16.0"))
         #expect(result.output.contains("Transport and observation are ready"))
 
         let log = try fixture.logContents()
@@ -72,7 +72,7 @@ struct PreflightScriptTests {
         let script = """
         #!/bin/bash
         printf '%s\\n' "$*" >> "__LOG_PATH__"
-        if [[ "$1" == "--version" ]]; then echo '0.11.0'; exit 0; fi
+        if [[ "$1" == "--version" ]]; then echo '0.16.0'; exit 0; fi
         if [[ "$1" == "devices" ]]; then
           echo '{"ok":true,"data":{"devices":[{"deviceId":"hdc-target","name":"Harmony","platform":"harmonyos","state":"Connected"}]}}'
           exit 0
@@ -106,7 +106,7 @@ struct PreflightScriptTests {
         let script = """
         #!/bin/bash
         sleep 1
-        echo '0.11.0'
+        echo '0.16.0'
         """
         let fixture = try Fixture(script: script)
         defer { fixture.remove() }
@@ -123,7 +123,7 @@ struct PreflightScriptTests {
     @Test("source-build Git identities are accepted as versions")
     func sourceBuildVersion() async throws {
         let script = successScript(platform: "ios", device: "target-device", state: "Booted")
-            .replacingOccurrences(of: "echo '0.11.0'", with: "echo '9a83c6f-dirty'")
+            .replacingOccurrences(of: "echo '0.16.0'", with: "echo '9a83c6f-dirty'")
         let fixture = try Fixture(script: script)
         defer { fixture.remove() }
 
@@ -136,13 +136,58 @@ struct PreflightScriptTests {
         #expect(result.output.contains("sim-use 9a83c6f-dirty"))
     }
 
+    @Test("release compatibility rejects old releases but accepts development stamps", arguments: [
+        (stamp: "0.15.9", expectedPass: false),
+        (stamp: "v0.16.0", expectedPass: true),
+        (stamp: "dev", expectedPass: true),
+        (stamp: "v0.15.0-3-gabc1234-dirty", expectedPass: true),
+    ])
+    func releaseCompatibility(_ testCase: (stamp: String, expectedPass: Bool)) async throws {
+        let script = successScript(platform: "ios", device: "target-device", state: "Booted")
+            .replacingOccurrences(of: "echo '0.16.0'", with: "echo '\(testCase.stamp)'")
+        let fixture = try Fixture(script: script)
+        defer { fixture.remove() }
+        let result = try await CommandRunner.run(
+            "python3 skills/sim-use/scripts/preflight.py --device target-device --sim-use-bin \(fixture.executable.path)",
+            allowFailure: true
+        )
+        #expect((result.exitCode == 0) == testCase.expectedPass, "\(result.output)")
+        if !testCase.expectedPass {
+            #expect(result.output.contains("brew upgrade"))
+            #expect(try fixture.logContents() == "--version\n")
+        }
+    }
+
+    @Test("compact UI preserves content warnings and physical-device geometry exemption", arguments: [
+        (response: #"{"ok":true,"data":{"platform":"ios","kind":"physical","outline":"Button: Close"}}"#, warning: false),
+        (response: #"{"ok":true,"data":{"platform":"ios","outline":"App: Test","entries":[]}}"#, warning: true),
+        (response: #"{"ok":true,"advisory":{"kind":"remote_content_recovery"},"data":{"platform":"ios","outline":"App: Test"}}"#, warning: true),
+        (response: #"{"ok":true,"data":{"platform":"ios","outline":"App: Test\nButton: OK","entries":[],"screen":{"width":100,"height":200}}}"#, warning: false),
+    ])
+    func compactUIContent(_ testCase: (response: String, warning: Bool)) async throws {
+        let script = successScript(platform: "ios", device: "target-device", state: "Booted")
+        let lines = script.components(separatedBy: "\n")
+        let rendered = lines.map { line in
+            line.contains("data") && line.contains("outline") ? "  echo '\(testCase.response)'" : line
+        }.joined(separator: "\n")
+        let fixture = try Fixture(script: rendered)
+        defer { fixture.remove() }
+        let result = try await CommandRunner.run(
+            "python3 skills/sim-use/scripts/preflight.py --device target-device --sim-use-bin \(fixture.executable.path)",
+            allowFailure: true
+        )
+        #expect(result.exitCode == 0, "\(result.output)")
+        #expect(result.output.contains("WARN  UI content") == testCase.warning)
+        #expect(try !fixture.logContents().contains("daemon stop"))
+    }
+
     private func successScript(platform: String, device: String, state: String) -> String {
         """
         #!/bin/bash
         printf '%s\\n' "$*" >> "__LOG_PATH__"
 
         if [[ "$1" == "--version" ]]; then
-          echo '0.11.0'
+          echo '0.16.0'
           exit 0
         fi
 
@@ -187,33 +232,33 @@ struct PreflightScriptTests {
         exit 4
         """
     }
-}
 
-private struct Fixture {
-    let directory: URL
-    let executable: URL
-    let log: URL
+    private struct Fixture {
+        let directory: URL
+        let executable: URL
+        let log: URL
 
-    init(script: String) throws {
-        directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("sim-use-preflight-tests-\(UUID().uuidString)", isDirectory: true)
-        executable = directory.appendingPathComponent("sim-use")
-        log = directory.appendingPathComponent("sim-use-args.log")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let rendered = script.replacingOccurrences(of: "__LOG_PATH__", with: log.path)
-        try rendered.write(to: executable, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755],
-            ofItemAtPath: executable.path
-        )
-    }
+        init(script: String) throws {
+            directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("sim-use-preflight-tests-\(UUID().uuidString)", isDirectory: true)
+            executable = directory.appendingPathComponent("sim-use")
+            log = directory.appendingPathComponent("sim-use-args.log")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let rendered = script.replacingOccurrences(of: "__LOG_PATH__", with: log.path)
+            try rendered.write(to: executable, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: executable.path
+            )
+        }
 
-    func logContents() throws -> String {
-        guard FileManager.default.fileExists(atPath: log.path) else { return "" }
-        return try String(contentsOf: log, encoding: .utf8)
-    }
+        func logContents() throws -> String {
+            guard FileManager.default.fileExists(atPath: log.path) else { return "" }
+            return try String(contentsOf: log, encoding: .utf8)
+        }
 
-    func remove() {
-        try? FileManager.default.removeItem(at: directory)
+        func remove() {
+            try? FileManager.default.removeItem(at: directory)
+        }
     }
 }

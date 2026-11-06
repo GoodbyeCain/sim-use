@@ -39,6 +39,7 @@ struct StreamVideo: SimUseExecutableCommand {
     )
 
     @OptionGroup var device: DeviceOptions
+    @OptionGroup var targetPlatform: TargetPlatformOptions
 
     @Option(help: "Output format: h264 (native H.264 in MPEG-TS on both platforms — fastest, recommended); mjpeg, raw, ffmpeg (screenshot loop; DEPRECATED on iOS, retained on Android for devices where screenrecord is unavailable); bgra (iOS-only raw pixels). Default: mjpeg")
     var format: OutputFormat = .mjpeg
@@ -57,7 +58,7 @@ struct StreamVideo: SimUseExecutableCommand {
     var jsonOutput: Bool { json.enabled }
 
     mutating func resolveDeferredArguments() throws {
-        try device.resolve(allowPhysical: true)
+        try device.resolve(platform: targetPlatform.platform, allowPhysical: true)
     }
 
     var simulatorUDIDForDaemon: String? { device.resolved }
@@ -98,7 +99,7 @@ struct StreamVideo: SimUseExecutableCommand {
     }
 
     func execute() async throws -> ExecutionResult {
-        switch PlatformRouter.resolve(udid: device.resolved) {
+        switch device.resolvedPlatform {
         case .android:
             return try await executeAndroid()
         case .iOSDevice:
@@ -109,7 +110,7 @@ struct StreamVideo: SimUseExecutableCommand {
             )
         case .harmonyOS:
             throw CLIError(errorDescription: "HarmonyOS stream-video is not available yet; use screenshot for still captures.")
-        case .iOSSim, .none:
+        case .iOSSim:
             return try await executeIOSSim()
         }
     }

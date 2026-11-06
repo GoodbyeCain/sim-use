@@ -192,6 +192,8 @@ scripts/install-linux.sh
 
 ### Agent skill
 
+Use this skill first for mobile device, simulator, or emulator operations, including steps within larger tasks.
+
 To install the bundled agent skill into your AI client's skill directory:
 
 ```bash
@@ -236,13 +238,16 @@ For Android, run `sim-use android init --device <serial>` once to install the br
 **Physical iPhones and iPads** (experimental) route through the same top-level verbs — `sim-use ui`, `sim-use tap '#<id>' / --label` and `sim-use screenshot` work against a plugged-in device's UDID. The channel exposes no element geometry, so it trades coordinate taps, swipes and gestures for accessibility actions, and the remaining verbs reject with the reason and the nearest alternative — never assume capability parity; see the [capability matrix](#physical-ios-devices). sim-use installs and signs no runner and needs no Developer Disk Image; `ui`/`tap` need the foreground app to be development-signed (`get-task-allow=true`), `screenshot` captures any screen.
 
 
+HarmonyOS supports UI inspection, input, gestures and screenshots. Keyboard-state, app-state, recording and streaming return explicit unsupported errors.
+
 ## Commands
 
-All device-scoped commands accept `--device <ID>` (optional when only one simulator is booted). Three command layers:
+All device-scoped commands accept `--device <ID>` (optional when only one simulator is booted). Platform command layers:
 
   * **Top-level** — cross-platform verbs: `ui`, `tap`, `long-press`, `swipe`, `touch`, `multi-touch`, `type`, `paste`, `button`, `gesture`, `keyboard-state`, `screenshot`, `record-video`, `stream-video`, `app-state`. Same flags on iOS and Android; physical iOS devices route through `ui`, `tap` and `screenshot` only (the rest reject with the reason — see the [capability matrix](#physical-ios-devices)).
   * **`sim-use ios <verb>`** — iOS-Simulator-only: `key`, `key-combo`, `key-sequence`, `batch`, `rotate`, `fold`.
   * **`sim-use android <verb>`** — Android-only: `init`, `devices`, `ping`, `scroll`.
+  * **`sim-use harmonyos <verb>`** — HarmonyOS devices and emulators through hdc.
   * **`sim-use ios-device <verb>`** — physical-iOS-only: `devices`, `ui`, `screenshot`, `tap` (experimental). Peer of `ios`/`android`; also accepts ECIDs and the hierarchy tuning flags the top level doesn't carry.
 
 Run `sim-use --help` or `sim-use <command> --help` for the full flag set.

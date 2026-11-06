@@ -92,7 +92,7 @@ struct Type: SimUseExecutableCommand {
                 alternative: "Text input on physical iOS devices is not available yet. If the step only needs an activation, use `sim-use tap '#<id>' / --label`."
             )
         case .harmonyOS:
-            return try await executeHarmonyOS()
+            return try executeHarmonyOS()
         case .iOSSim:
             return try await executeIOSSim()
         }

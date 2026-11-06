@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import CompanionUtilities
+import CoreGraphics
 import FBControlCore
 import FBSimulatorControl
 import Foundation
